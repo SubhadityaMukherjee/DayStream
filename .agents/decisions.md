@@ -33,3 +33,31 @@ Canonical format is ISO `yyyy-MM-dd.md`. `VaultStore.migrateLegacyFilenames()` c
 ## Menu bar panel
 
 `MenuBarExtra` with `.window` style — a real popover window with a TextField (menu style doesn't support text input). Quick-add appends `- TODO <text>` to today's canonical file via `ensureTodayFile()` so it never duplicates existing files.
+
+## Task timestamps (`added::` / `completed::`)
+
+Quick-add, recurring injection, and ⌘S on *today's* note stamp open tasks with `added:: yyyy-MM-dd HH:mm` (local) as a tab-indented property line right under the bullet. Toggling to DONE stamps/updates `completed::` in the file the click happened in only — cross-note sync (`syncedText`) never adds lines, it only flips markers, preserving the line-count invariant. Duration capsule in the stream renders only when both stamps parse.
+
+## Recurring tasks
+
+`RecurringTaskStore` (UserDefaults JSON) holds daily / weekly(weekday) / once(date) tasks. `VaultStore.applyRecurringTasks` prepends due tasks via `addTask`, which duplicate-checks against the note's content keys (same normalization as carry-forward), so re-running on every launch/reload/midnight-rollover is idempotent. Triggered from `AppModel`: vault setup, Today button, `createDayNote` (so calendar-clicked empty days get their tasks), and a 60s rollover timer.
+
+## Wikilink routing
+
+`MarkdownText` classifies each `[[target]]`: if `WikiDate.parse` matches (ISO, `Aug 18th, 2026`, `18 Aug 2026` variants) the link goes to `daystream://date?value=yyyy-MM-dd` → reveal/create that day in the stream; otherwise `daystream://page?name=…` → PageView. PageView renders front-page-style (BlockRowView + linked references) with a raw-editor toggle; ⎋/⌘S save and return to rendered. Double-click-to-edit uses `simultaneousGesture` so plain link clicks still work.
+
+## Editor extras
+
+`EditorTextView` handles ⌘S (`onSaveCommit`: `NoteFormatter.normalizedForSave` — drop empty bullets, blank line between top-level wikilink groups and what follows, stamp `added::` today-only — then quit editing). `[[` triggers a page-name suggestion popover (`WikiSuggestController`, self-drawing rows, transient NSPopover that refuses first responder so typing is uninterrupted; ↑/↓/⏎/⇥ navigate). `VaultStore.allPageNames()` (pages dir + every wikilink target, 5s TTL cache) feeds both the popover and search.
+
+## Deadlines
+
+`DeadlineStore` (UserDefaults JSON, like recurring tasks) holds `{title, date}` items. Sidebar section lists them soonest-first with relative labels (`Today`, `Tomorrow`, `Fri`, `Aug 30`, `Overdue 2d` — red). Clicking one goes through `createDayNote` (creates + seeds + reveals). On the due date the title is seeded into the day's note via `VaultStore.applyDeadlines` → `addTask(atTop:)`, same duplicate-checked path as recurring tasks, so completing or keeping the task never re-duplicates. Deadlines stay listed until manually removed — "persistent" per the feature request.
+
+## Search
+
+`VaultStore.search` walks every loaded journal file (newest day first) then every page file, case-insensitive substring per line, capped at a limit. `SearchBarView` (MainView) debounces 150ms, shows a content-sized dropdown (no inner scroll views — they're greedy and break panel sizing), journal hits → `reveal(day:)`, page hits → `PageRef` sheet.
+
+## Docs site
+
+`docs/index.html` is the entire GitHub Pages site (single file, no build step; dark mode via `prefers-color-scheme`). Badges must reference things that exist — the repo has no LICENSE file, so no license badge. `docs/icon.png` is a copy of the app icon.

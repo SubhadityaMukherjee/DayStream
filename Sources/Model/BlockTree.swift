@@ -232,6 +232,12 @@ enum BlockTree {
         return units
     }
 
+    /// Public wrapper over the private bullet parser for line-level helpers
+    /// (timestamp stamping, save normalization).
+    static func bulletInfo(_ line: String) -> (indent: Int, marker: String?, content: String)? {
+        parseBullet(line)
+    }
+
     // MARK: - Todo toggling (surgical, preserves all other bytes)
 
     /// Returns the file text with the given block's todo state flipped.

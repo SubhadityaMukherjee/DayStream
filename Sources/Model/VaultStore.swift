@@ -124,6 +124,7 @@ final class VaultStore {
         pageCount = ((try? fm.contentsOfDirectory(atPath: pagesURL.path)) ?? [])
             .filter { $0.hasSuffix(".md") }
             .count
+        pageNamesCache = nil
 
         if watchEnabled {
             installWatchers()
@@ -187,12 +188,15 @@ final class VaultStore {
     }
 
     func toggleTodo(in file: VaultFile, block: Block, syncAcrossNotes: Bool = true) {
-        let newText = BlockTree.toggledFileText(file.text, blockLineIndex: block.lineIndex)
-        write(text: newText, to: file.url)
-        guard syncAcrossNotes, block.todoState != .none else { return }
+        var newText = BlockTree.toggledFileText(file.text, blockLineIndex: block.lineIndex)
+        guard newText != file.text else { return }
         let key = BlockTree.normalize(block.content)
-        guard !key.isEmpty else { return }
         let target: TodoState = block.todoState == .done ? .open : .done
+        if target == .done {
+            newText = NoteFormatter.withCompletionStamp(newText, blockLineIndex: block.lineIndex, at: Date())
+        }
+        write(text: newText, to: file.url)
+        guard syncAcrossNotes, block.todoState != .none, !key.isEmpty else { return }
         // Snapshot candidates on the main thread, then match/rewrite off-main so
         // a click never stalls the UI on large vaults; results are applied back
         // on the main thread.
@@ -220,6 +224,155 @@ final class VaultStore {
                 }
             }
         }
+    }
+
+    // MARK: - Task insertion (quick add, scheduled, recurring)
+
+    /// Writes `- TODO <title>` (with an `added::` timestamp) into the day's
+    /// canonical file, creating the file if needed. Duplicate-checked against
+    /// the note's existing content, so re-adding or re-applying is a no-op.
+    /// Returns false when the task was already present (or empty).
+    @discardableResult
+    func addTask(_ title: String, to date: Date, atTop: Bool) -> Bool {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return false }
+        let (url, existing) = ensureDayFile(for: date)
+        let existingKeys = BlockTree.allContentKeys(BlockTree.parse(existing))
+        guard !existingKeys.contains(BlockTree.normalize(trimmedTitle)) else { return false }
+
+        let entry = ["- TODO " + trimmedTitle, "\tadded:: " + NoteFormatter.timestamp(Date())]
+        let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newText: String
+        if trimmed.isEmpty {
+            newText = entry.joined(separator: "\n") + "\n"
+        } else if atTop {
+            newText = entry.joined(separator: "\n") + "\n\n" + trimmed + "\n"
+        } else {
+            newText = trimmed + "\n" + entry.joined(separator: "\n") + "\n"
+        }
+        write(text: newText, to: url)
+        if !days.contains(where: { $0.date == JournalDate.startOfDay(date) }) {
+            reload()
+        }
+        return true
+    }
+
+    /// Prepends every task due on `date` to that day's note. Duplicate-checked
+    /// per task, so this is safe to run on every launch, reload and rollover.
+    @discardableResult
+    func applyRecurringTasks(_ tasks: [RecurringTask], to date: Date = Date()) -> Int {
+        var added = 0
+        for task in tasks where task.isDue(on: date) {
+            if addTask(task.title, to: date, atTop: true) {
+                added += 1
+            }
+        }
+        return added
+    }
+
+    /// Seeds deadlines due on `date` into that day's note (duplicate-checked,
+    /// like recurring tasks).
+    @discardableResult
+    func applyDeadlines(_ deadlines: [Deadline], to date: Date = Date()) -> Int {
+        var added = 0
+        for deadline in deadlines where deadline.isDue(on: date) {
+            if addTask(deadline.title, to: date, atTop: true) {
+                added += 1
+            }
+        }
+        return added
+    }
+
+    // MARK: - Page name index (wikilink autocomplete)
+
+    private var pageNamesCache: (names: [String], at: Date)?
+
+    /// Every page name that exists or is referenced anywhere in the vault:
+    /// files in pages/ plus all `[[wikilink]]` targets in journals and pages.
+    /// Short-TTL cache; invalidated on reload.
+    func allPageNames() -> [String] {
+        if let cache = pageNamesCache, Date().timeIntervalSince(cache.at) < 5 {
+            return cache.names
+        }
+        var names = Set<String>()
+        for url in pageFileURLs() {
+            names.insert(WikiName.pageName(for: url.lastPathComponent))
+        }
+        for day in days {
+            for file in day.files {
+                for target in WikiName.wikilinkTargets(in: file.text) {
+                    names.insert(target)
+                }
+            }
+        }
+        for url in pageFileURLs() {
+            for target in WikiName.wikilinkTargets(in: pageText(at: url)) {
+                names.insert(target)
+            }
+        }
+        let sorted = names
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        pageNamesCache = (sorted, Date())
+        return sorted
+    }
+
+    // MARK: - Vault-wide search
+
+    struct SearchHit: Identifiable {
+        let url: URL
+        /// Journal day (start-of-day) for journals; nil for pages.
+        let date: Date?
+        let title: String
+        let lineText: String
+        var id: String { url.absoluteString + ":" + lineText }
+        var isPage: Bool { date == nil }
+    }
+
+    /// Case-insensitive substring search across every journal and page line.
+    /// Journals newest-first, then pages; a page whose *name* matches is
+    /// offered first among page hits.
+    func search(_ rawQuery: String, limit: Int = 100) -> [SearchHit] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let lower = query.lowercased()
+        var out: [SearchHit] = []
+
+        for day in days {
+            for file in day.files {
+                for line in file.text.components(separatedBy: "\n") {
+                    if line.lowercased().contains(lower) {
+                        out.append(SearchHit(
+                            url: file.url,
+                            date: day.date,
+                            title: JournalDate.filename(for: day.date),
+                            lineText: line.trimmingCharacters(in: .whitespaces)
+                        ))
+                        if out.count >= limit { return out }
+                    }
+                }
+            }
+        }
+
+        for url in pageFileURLs() {
+            let name = WikiName.pageName(for: url.lastPathComponent)
+            if name.lowercased().contains(lower) {
+                out.append(SearchHit(
+                    url: url, date: nil, title: name, lineText: "Page"
+                ))
+                if out.count >= limit { return out }
+            }
+            for line in pageText(at: url).components(separatedBy: "\n") {
+                if line.lowercased().contains(lower) {
+                    out.append(SearchHit(
+                        url: url, date: nil, title: name,
+                        lineText: line.trimmingCharacters(in: .whitespaces)
+                    ))
+                    if out.count >= limit { return out }
+                }
+            }
+        }
+        return out
     }
 
     // MARK: - Carry forward

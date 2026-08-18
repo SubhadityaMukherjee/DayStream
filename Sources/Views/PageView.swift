@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Editor sheet for a `[[wikilink]]` page: content editor plus Logseq-style
-/// "Linked References" — every line across the vault that mentions this page.
+/// Sheet for a `[[wikilink]]` page. Renders like the front page (blocks +
+/// linked references); "Edit" switches to the raw markdown editor, where
+/// ⎋/⌘S save and return to the rendered view.
 struct PageView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     let pageName: String
 
@@ -11,68 +13,47 @@ struct PageView: View {
     @State private var loaded = false
     @State private var pageURL: URL?
     @State private var isDirty = false
+    @State private var isEditing = false
     @State private var mentions: [VaultStore.Mention] = []
     @State private var confirmDelete = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text(pageName)
-                    .font(.system(size: 15, weight: .semibold))
-                if isDirty {
-                    Text("edited")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-                Spacer()
-
-                if let isEmpty = pageTextIsEmpty, isEmpty {
-                    Button {
-                        confirmDelete = true
-                    } label: {
-                        Image(systemName: "trash")
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Delete this empty page")
-                    .confirmationDialog(
-                        "Delete the empty page “\(pageName)”?",
-                        isPresented: $confirmDelete,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete Page", role: .destructive) {
-                            deleteEmptyPage()
-                        }
-                    }
-                }
-
-                Button("Close") {
-                    save()
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-            }
-            .padding()
-
+            header
             Divider()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    MarkdownEditorView(text: $text, imageImporter: imageImporter) { newText in
-                        isDirty = true
-                        scheduleSave()
-                        refreshMentions(newText: newText)
-                    } onCommit: {
-                        save()
-                        dismiss()
+                    if isEditing {
+                        MarkdownEditorView(
+                            text: $text,
+                            imageImporter: imageImporter,
+                            pageNamesProvider: { [weak appModel] in appModel?.store?.allPageNames() ?? [] },
+                            onTextChanged: { _ in
+                                isDirty = true
+                                scheduleSave()
+                            },
+                            onCommit: {
+                                exitEditing()
+                            },
+                            onSaveCommit: {
+                                saveAndQuit()
+                            }
+                        )
+                        .padding(.horizontal, 8)
+                    } else {
+                        renderedContent
+                            .padding(.horizontal, 8)
+                            .contentShape(.rect)
+                            .simultaneousGesture(TapGesture(count: 2).onEnded { startEditing() })
                     }
-                    .padding(.horizontal, 8)
 
                     mentionsSection
                         .padding(.horizontal, 8)
                         .padding(.bottom, 12)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
             }
         }
         .frame(minWidth: 560, minHeight: 460)
@@ -83,12 +64,128 @@ struct PageView: View {
                 let url = store.pageURL(named: pageName, createIfMissing: true)
                 pageURL = url
                 text = url.map { store.pageText(at: $0) } ?? ""
-                refreshMentions(newText: text)
+                refreshMentions()
             }
         }
         .onDisappear {
             save()
         }
+    }
+
+    private var header: some View {
+        HStack {
+            Text(pageName)
+                .font(.system(size: 15, weight: .semibold))
+            if isDirty {
+                Text("edited")
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+            }
+            Spacer()
+
+            if let isEmpty = pageTextIsEmpty, isEmpty {
+                Button {
+                    confirmDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.red)
+                }
+                .buttonStyle(.plain)
+                .help("Delete this empty page")
+                .confirmationDialog(
+                    "Delete the empty page “\(pageName)”?",
+                    isPresented: $confirmDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Page", role: .destructive) {
+                        deleteEmptyPage()
+                    }
+                }
+            }
+
+            Button {
+                if isEditing {
+                    exitEditing()
+                } else {
+                    startEditing()
+                }
+            } label: {
+                Image(systemName: isEditing ? "checkmark.circle.fill" : "square.and.pencil")
+                    .foregroundStyle(isEditing ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help(isEditing ? "Done (⎋ or ⌘S)" : "Edit this page")
+
+            Button("Close") {
+                if isEditing {
+                    exitEditing()
+                } else {
+                    save()
+                    dismiss()
+                }
+            }
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding()
+    }
+
+    // MARK: - Rendered (front-page style) content
+
+    @ViewBuilder
+    private var renderedContent: some View {
+        let blocks = BlockTree.parse(text)
+        if blocks.isEmpty {
+            Text("Empty page — double-click to write.")
+                .font(.callout)
+                .foregroundStyle(.tertiary)
+                .padding(.vertical, 6)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(blocks) { block in
+                    BlockRowView(block: block, file: renderFile, store: appModel.store ?? dummyStore, onToggle: toggleOnPage)
+                }
+            }
+        }
+    }
+
+    private var renderFile: VaultFile {
+        VaultFile(url: pageURL ?? URL(fileURLWithPath: "/dev/null"), date: Date(), text: text)
+    }
+
+    private var dummyStore: VaultStore {
+        VaultStore(vaultURL: URL(fileURLWithPath: "/dev/null"), watchEnabled: false)
+    }
+
+    /// Toggles a task inside this page and refreshes the local text (page
+    /// writes bypass the days array, so the store can't push updates here).
+    private func toggleOnPage(_ block: Block) {
+        guard let url = pageURL, let store = appModel.store else { return }
+        let file = VaultFile(url: url, date: Date(), text: text)
+        store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
+        text = store.pageText(at: url)
+        isDirty = false
+        refreshMentions()
+    }
+
+    // MARK: - Editing
+
+    private func startEditing() {
+        save()
+        isEditing = true
+    }
+
+    private func exitEditing() {
+        save()
+        isEditing = false
+    }
+
+    /// ⌘S: normalize (drop empty bullets, space wikilink groups), save, and
+    /// return to the rendered view.
+    private func saveAndQuit() {
+        saveTask?.cancel()
+        text = NoteFormatter.normalizedForSave(text, isToday: false, now: Date())
+        save()
+        isEditing = false
     }
 
     private var pageTextIsEmpty: Bool? {
@@ -150,7 +247,7 @@ struct PageView: View {
         }
     }
 
-    private func refreshMentions(newText: String) {
+    private func refreshMentions() {
         guard let store = appModel.store else { return }
         mentions = store.mentions(of: pageName)
     }
@@ -176,7 +273,7 @@ struct PageView: View {
         if current != text {
             store.write(text: text, to: url)
             isDirty = false
-            refreshMentions(newText: text)
+            refreshMentions()
         }
     }
 
@@ -198,41 +295,4 @@ struct PageView: View {
         f.timeStyle = .none
         return f
     }()
-}
-
-/// Sheet for creating a brand-new page note.
-struct NewNoteSheet: View {
-    @Environment(AppModel.self) private var appModel
-    @Environment(\.dismiss) private var dismiss
-    @State private var name = ""
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Text("New Page")
-                .font(.system(size: 14, weight: .semibold))
-            TextField("Page name (e.g. Research Ideas)", text: $name)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(create)
-            HStack {
-                Button("Cancel") { dismiss() }
-                Button("Create & Edit", action: create)
-                    .buttonStyle(.borderedProminent)
-                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-        }
-        .padding()
-    }
-
-    private func create() {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return }
-        // Create the markdown file in the vault right away — it must exist on
-        // disk even if the editor sheet is never opened or saved into.
-        if let url = appModel.store?.pageURL(named: trimmed, createIfMissing: true) {
-            appModel.store?.write(text: (try? String(contentsOf: url, encoding: .utf8)) ?? "", to: url)
-        }
-        appModel.showNewNote = false
-        appModel.openPage = AppModel.PageRef(name: trimmed)
-        dismiss()
-    }
 }

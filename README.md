@@ -6,12 +6,15 @@ Author: **Subhaditya Mukherjee**
 
 ## What it does
 
-- **Daily-notes stream** — every dated note in `journals/`, newest first, with a month calendar sidebar for quick navigation.
-- **Outliner editing** — Enter continues bullets, Tab/Shift-Tab indent/outdent, `/todo `/`/doing `/`/later `/`/done ` slash commands, TODO-family markers with live syntax highlighting.
+- **Daily-notes stream** — every dated note in `journals/`, newest first, with a month calendar sidebar for quick navigation. Notes for new days are created automatically (launch, Today button, calendar clicks, midnight rollover).
+- **Outliner editing** — Enter continues bullets, Tab/Shift-Tab indent/outdent, `/todo `/`/doing `/`/later `/`/done ` slash commands, TODO-family markers with live syntax highlighting. `⌘S` saves, tidies (drops empty bullets, spaces `[[wikilink]]` groups) and closes the editor.
+- **Task timing** — captured tasks record `added::` timestamps; completing one stamps `completed::` and the stream shows how long it took next to the finished task.
 - **Task syncing** — checking a task rewrites matching tasks in every other note (journals and pages alike).
+- **Recurring tasks & deadlines** — daily / weekly / once tasks (Settings → Recurring) seed themselves at the top of the due day's note, duplicate-checked so they never double up. Deadlines pin in the sidebar with countdowns and jump to their day.
 - **Carry forward** — one click copies all unfinished tasks from previous days into today's note, preserving structure.
-- **[[Wikilinks]] & pages** — click to open or create a page in `pages/`, with Logseq-style Linked References showing every mention across the vault.
-- **Menu bar applet** — quick-add a task to today and toggle today's open tasks without leaving what you're doing.
+- **[[Wikilinks]] & pages** — typing `[[` suggests existing page names; pages open as a rendered view with Logseq-style Linked References; date-shaped links (`[[Aug 18th, 2026]]`) jump to that day.
+- **Search** — one bar across every journal and page; hits jump to their day or page.
+- **Menu bar applet** — quick-add a task for today or schedule it to any date, and toggle today's open tasks without leaving what you're doing.
 - **Image & file drops** — dropped images are copied into `assets/` and embedded with relative markdown links.
 - **Live on disk** — external edits are picked up via file watching; the vault is safe to use from other tools at the same time.
 
@@ -48,7 +51,7 @@ Recognized journal filename formats: `yyyy-MM-dd.md` (current convention, used f
 
 ## Documentation
 
-- GitHub Pages site: https://subhadityamukherjee.github.io/daily_stream/
+- Full usage guide & FAQ (GitHub Pages): https://subhadityamukherjee.github.io/daily_stream/
 - This README renders on the repo home page.
 
 ## Branching & releases
