@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */; };
 		1436703D1FF1DE32722616F5 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478B8797070D7D84A9968027 /* MainView.swift */; };
+		1655BDF3E41349657463F5E4 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */; };
 		1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E026860706F7C832FDBE3CF /* VaultStore.swift */; };
 		2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86F2ED4411BBE44B6243822 /* DaySectionView.swift */; };
 		2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395EE5A200865344BF08F6C /* CalendarView.swift */; };
@@ -36,6 +37,7 @@
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
 		EC24269376B29BF7DB79BC57 /* MenuBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */; };
+		F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,6 +51,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitBackup.swift; sourceTree = "<group>"; };
 		0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		15757316319E7B2BC0AF72BD /* BlockRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockRowView.swift; sourceTree = "<group>"; };
@@ -79,6 +82,7 @@
 		D28CCBC0CF4AC629300BDC1B /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
 		DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
 		E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStreamView.swift; sourceTree = "<group>"; };
+		F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		FF59C399937042AEE4E3CC43 /* WikiName.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiName.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -99,6 +103,7 @@
 				6325935B942277AF6F6D0638 /* BlockTree.swift */,
 				B84877F8F494AFFEAA6E3850 /* CarryForward.swift */,
 				19C1E6CA336FB755C292C968 /* Deadline.swift */,
+				03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */,
 				B5121535597CF66EE7B102F4 /* JournalDate.swift */,
 				46D7A88C7C41D3B06072764F /* NoteFormatter.swift */,
 				C5878FA05D237542D2AC416C /* RecurringTask.swift */,
@@ -151,6 +156,7 @@
 				A7095D2E8BAAA3630B334211 /* MarkdownText.swift */,
 				424E0ECF875895A3EC9513CA /* PageView.swift */,
 				6E42184F435A686A811D04BC /* SettingsView.swift */,
+				F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -300,6 +306,7 @@
 				2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */,
 				A4E760288880C82880E160E3 /* DayStreamApp.swift in Sources */,
 				58AA473C480CF1BCEF5B4CF6 /* Deadline.swift in Sources */,
+				F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */,
 				74926DDCBCC2C9ED8C04BA94 /* JournalDate.swift in Sources */,
 				1436703D1FF1DE32722616F5 /* MainView.swift in Sources */,
 				C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */,
@@ -311,6 +318,7 @@
 				3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */,
 				B231746BDA28B33A89736FDE /* SetupView.swift in Sources */,
 				1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */,
+				1655BDF3E41349657463F5E4 /* WelcomeView.swift in Sources */,
 				B44BD1958C85D05C67683844 /* WikiDate.swift in Sources */,
 				3A3F6731B5EA985E0F268EF4 /* WikiName.swift in Sources */,
 			);
@@ -400,7 +408,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -509,7 +517,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.2.0;
+				MARKETING_VERSION = 1.3.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

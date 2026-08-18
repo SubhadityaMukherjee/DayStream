@@ -334,6 +334,25 @@ enum BlockTree {
         return out
     }
 
+    /// Every non-empty line of the block's subtree (children included),
+    /// trimmed, capped at `maxLines` with an ellipsis marker. Used for
+    /// linked-reference previews.
+    static func subtreeLines(_ block: Block, maxLines: Int) -> [String] {
+        var lines: [String] = []
+        func rec(_ b: Block) {
+            lines.append(contentsOf: b.rawLines)
+            b.children.forEach(rec)
+        }
+        rec(block)
+        let trimmed = lines
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if trimmed.count > maxLines {
+            return Array(trimmed.prefix(maxLines)) + ["…"]
+        }
+        return trimmed
+    }
+
     /// Recursively collects open tasks with their plain (non-task) ancestor chains.
     static func collectOpenTasks(
         _ nodes: [Block],

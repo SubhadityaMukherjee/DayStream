@@ -16,6 +16,40 @@ final class AppModel {
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
 
+    enum SettingsTab: Int {
+        case general = 0, fonts = 1, recurring = 2, advanced = 3
+    }
+
+    /// Set alongside `openSettings()` to land on a specific tab; SettingsView
+    /// consumes (and clears) it on appear/change.
+    var requestedSettingsTab: SettingsTab?
+
+    /// A day to reveal once the currently presented sheet has finished
+    /// dismissing. Scrolling during the dismissal animation gets swallowed,
+    /// so PageView/date links queue here and MainView's sheet `onDismiss`
+    /// consumes it.
+    struct PendingReveal: Equatable {
+        var day: Date
+        var createIfMissing: Bool
+    }
+
+    var pendingReveal: PendingReveal?
+
+    func queueReveal(day: Date, createIfMissing: Bool) {
+        pendingReveal = PendingReveal(day: day, createIfMissing: createIfMissing)
+    }
+
+    /// Runs the queued reveal (if any) — call from a sheet's onDismiss.
+    func consumePendingReveal() {
+        guard let pending = pendingReveal else { return }
+        pendingReveal = nil
+        if pending.createIfMissing {
+            createDayNote(for: pending.day)
+        } else {
+            reveal(day: pending.day)
+        }
+    }
+
     struct PageRef: Identifiable {
         let name: String
         var id: String { name }
@@ -43,6 +77,11 @@ final class AppModel {
         self.store = store
         loadedDays = 60
         editingDay = nil
+        lastAppliedDay = nil
+        // Deadlines live in defaults + a markdown mirror inside the vault;
+        // pick up hand-edited entries from the file before seeding today.
+        deadlines.vaultFileURL = store.deadlinesFileURL
+        deadlines.syncWithVaultFile()
         ensureTodayExists()
         applyScheduledForToday()
     }
@@ -106,14 +145,21 @@ final class AppModel {
         ensureTodayExists()
     }
 
-    // MARK: - Scheduled work (recurring + deadlines)
+    // MARK: - Scheduled work (recurring + deadlines + auto carry-forward)
 
     private func applyScheduledForToday() {
         guard let store else { return }
+        let today = JournalDate.startOfDay(Date())
+        // First application of the day this session (launch after midnight or
+        // rollover while open): also carry unfinished tasks forward, silently.
+        let isFirstToday = lastAppliedDay != today
         store.applyRecurringTasks(recurring.tasks, to: Date())
         store.applyDeadlines(deadlines.deadlines, to: Date())
+        if isFirstToday, AppSettings.shared.autoCarryForward {
+            _ = store.carryForward()
+        }
         ensureTodayExists()
-        lastAppliedDay = JournalDate.startOfDay(Date())
+        lastAppliedDay = today
     }
 
     /// Catches midnight rollover while the app is open: reloads the vault and

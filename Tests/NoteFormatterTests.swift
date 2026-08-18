@@ -238,6 +238,38 @@ final class DeadlineTests: XCTestCase {
         XCTAssertEqual(DeadlineStore(defaults: defaults).deadlines.count, 1)
     }
 
+    func testVaultFileMirrorWritesAndMerges() throws {
+        let suite = "daystream-tests-deadlines-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("daystream-deadline-mirror-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let file = tmp.appendingPathComponent("deadlines.md")
+
+        let store = DeadlineStore(defaults: defaults)
+        store.vaultFileURL = file
+        store.add(Deadline(title: "Submit paper", date: date("2026-08-20")))
+
+        // Mirror written, soonest-first.
+        let written = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertEqual(written, "- [2026-08-20] Submit paper\n")
+
+        // Hand-edited entry merged on sync; known one not duplicated.
+        try "- [2026-08-20] Submit paper\n- [2026-10-01] Renew passport\n".write(to: file, atomically: true, encoding: .utf8)
+        store.syncWithVaultFile()
+        XCTAssertEqual(store.deadlines.count, 2)
+        XCTAssertTrue(store.deadlines.contains { $0.title == "Renew passport" })
+        let normalized = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertEqual(normalized.components(separatedBy: "\n").count, 3, "two entries + trailing newline")
+
+        // Deleting mirrors through to the file.
+        store.delete(store.deadlines.first { $0.title == "Renew passport" }!.id)
+        XCTAssertFalse(try String(contentsOf: file, encoding: .utf8).contains("Renew passport"))
+    }
+
     func testApplyDeadlinesSeedsDueDayOnlyAndIsIdempotent() throws {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("daystream-deadline-\(UUID().uuidString)", isDirectory: true)

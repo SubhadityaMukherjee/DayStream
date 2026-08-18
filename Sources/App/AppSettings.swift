@@ -12,6 +12,9 @@ final class AppSettings {
         static let fontDesign = "daystream.fontDesign"
         static let fontSize = "daystream.fontSize"
         static let syncTodos = "daystream.syncTodosAcrossNotes"
+        static let autoCarry = "daystream.autoCarryForward"
+        static let welcome = "daystream.hasSeenWelcome"
+        static let gitBackupPath = "daystream.gitBackupPath"
     }
 
     /// 0 = system sans (SF Pro), 1 = serif (New York), 2 = rounded, 3 = monospace.
@@ -25,12 +28,28 @@ final class AppSettings {
     var syncTodosAcrossNotes: Bool {
         didSet { UserDefaults.standard.set(syncTodosAcrossNotes, forKey: Keys.syncTodos) }
     }
+    /// Each new day, unfinished tasks from previous days are copied into the
+    /// new day's note automatically (once per day, duplicate-checked).
+    var autoCarryForward: Bool {
+        didSet { UserDefaults.standard.set(autoCarryForward, forKey: Keys.autoCarry) }
+    }
+    /// One-time welcome window has been shown.
+    var hasSeenWelcome: Bool {
+        didSet { UserDefaults.standard.set(hasSeenWelcome, forKey: Keys.welcome) }
+    }
+    /// Repository folder used by Settings → Advanced git backup ("" = unset).
+    var gitBackupPath: String {
+        didSet { UserDefaults.standard.set(gitBackupPath, forKey: Keys.gitBackupPath) }
+    }
 
     init() {
         let d = UserDefaults.standard
         self.fontDesign = d.object(forKey: Keys.fontDesign) as? Int ?? 0
         self.fontSize = d.object(forKey: Keys.fontSize) as? Double ?? 15
         self.syncTodosAcrossNotes = d.object(forKey: Keys.syncTodos) as? Bool ?? true
+        self.autoCarryForward = d.object(forKey: Keys.autoCarry) as? Bool ?? true
+        self.hasSeenWelcome = d.bool(forKey: Keys.welcome)
+        self.gitBackupPath = d.string(forKey: Keys.gitBackupPath) ?? ""
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {

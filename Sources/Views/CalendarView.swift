@@ -3,6 +3,7 @@ import SwiftUI
 struct CalendarView: View {
     @Environment(AppModel.self) private var appModel
     @State private var displayedMonth: Date = JournalDate.startOfDay(Date())
+    @State private var showMonthPicker = false
 
     private var calendar: Calendar {
         var c = Calendar(identifier: .gregorian)
@@ -35,8 +36,27 @@ struct CalendarView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Text(monthTitle)
-                    .font(.system(size: 13, weight: .semibold))
+                Button {
+                    showMonthPicker.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(monthTitle)
+                            .font(.system(size: 13, weight: .semibold))
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .help("Jump to a month")
+                .popover(isPresented: $showMonthPicker, arrowEdge: .bottom) {
+                    MonthYearPicker(month: displayedMonth, calendar: calendar) { picked in
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            displayedMonth = picked
+                        }
+                        showMonthPicker = false
+                    }
+                }
                 Spacer()
                 Button {
                     moveMonth(1)
@@ -142,5 +162,77 @@ struct CalendarView: View {
         let f = DateFormatter()
         f.dateStyle = .medium
         return f.string(from: date)
+    }
+}
+
+/// Year stepper + month grid shown when clicking the calendar's month title.
+private struct MonthYearPicker: View {
+    let month: Date
+    let calendar: Calendar
+    let onPick: (Date) -> Void
+
+    @State private var year: Int
+
+    init(month: Date, calendar: Calendar, onPick: @escaping (Date) -> Void) {
+        self.month = month
+        self.calendar = calendar
+        self.onPick = onPick
+        _year = State(initialValue: calendar.component(.year, from: month))
+    }
+
+    private var currentMonthIndex: Int { calendar.component(.month, from: month) }
+    private var currentYear: Int { calendar.component(.year, from: month) }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Button {
+                    year -= 1
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Text(String(year))
+                    .font(.system(size: 13, weight: .semibold))
+                    .monospacedDigit()
+                Spacer()
+                Button {
+                    year += 1
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .buttonStyle(.plain)
+            }
+
+            let symbols = calendar.shortMonthSymbols
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), spacing: 6) {
+                ForEach(0..<12, id: \.self) { m in
+                    let isCurrent = (m + 1) == currentMonthIndex && year == currentYear
+                    Button {
+                        var comps = DateComponents()
+                        comps.year = year
+                        comps.month = m + 1
+                        comps.day = 1
+                        if let d = calendar.date(from: comps) {
+                            onPick(d)
+                        }
+                    } label: {
+                        Text(symbols[m])
+                            .font(.system(size: 11.5, weight: isCurrent ? .semibold : .regular))
+                            .foregroundStyle(isCurrent ? Color.white : Color.primary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(isCurrent ? Color.accentColor : .clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(12)
+        .frame(width: 264)
     }
 }

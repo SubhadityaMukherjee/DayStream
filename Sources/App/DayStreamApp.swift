@@ -31,6 +31,7 @@ struct DayStreamApp: App {
 
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         Group {
@@ -41,5 +42,13 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 640)
+        .sheet(isPresented: Binding(
+            get: { !settings.hasSeenWelcome },
+            set: { shown in
+                if !shown { settings.hasSeenWelcome = true }
+            }
+        )) {
+            WelcomeView()
+        }
     }
 }

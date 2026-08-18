@@ -47,13 +47,19 @@ struct Deadline: Identifiable, Codable, Equatable {
     }
 }
 
-/// UserDefaults-backed list of deadlines (JSON-encoded array), newest-last.
+/// UserDefaults-backed list of deadlines (JSON-encoded array), mirrored to
+/// `<vault root>/deadlines.md` so the data also lives in the vault itself.
+/// The file is human-editable: entries not known to the app are merged in
+/// when the vault is connected.
 @Observable
 final class DeadlineStore {
     private static let key = "daystream.deadlines"
     private let defaults: UserDefaults
 
     private(set) var deadlines: [Deadline] = []
+
+    /// Markdown mirror target; nil until a vault is connected.
+    var vaultFileURL: URL?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -85,5 +91,63 @@ final class DeadlineStore {
     private func persist() {
         guard let data = try? JSONEncoder().encode(deadlines) else { return }
         defaults.set(data, forKey: Self.key)
+        writeVaultFile()
+    }
+
+    // MARK: - Vault markdown mirror
+
+    private static func fileDateFormatter() -> DateFormatter {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }
+
+    /// Rewrites the mirror file from the in-memory list. Format:
+    /// `- [yyyy-MM-dd] Title`.
+    func writeVaultFile() {
+        guard let url = vaultFileURL else { return }
+        let df = Self.fileDateFormatter()
+        let text = sorted
+            .map { "- [\(df.string(from: $0.date))] \($0.title)" }
+            .joined(separator: "\n")
+        try? (text.isEmpty ? "" : text + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// Merges hand-edited entries from the mirror file into the list, then
+    /// normalizes the file. Called when a vault is connected.
+    func syncWithVaultFile() {
+        guard let url = vaultFileURL else { return }
+        let df = Self.fileDateFormatter()
+        var added = false
+        if let text = try? String(contentsOf: url, encoding: .utf8) {
+            let known = Set(deadlines.map { "\($0.title.lowercased())|\(df.string(from: $0.date))" })
+            for line in text.components(separatedBy: "\n") {
+                guard let g = Self.captures(line, #"^-\s*\[(\d{4}-\d{2}-\d{2})\]\s*(.+)$"#) else { continue }
+                guard let date = df.date(from: g[0]) else { continue }
+                let title = g[1].trimmingCharacters(in: .whitespaces)
+                guard !title.isEmpty else { continue }
+                let key = "\(title.lowercased())|\(g[0])"
+                if !known.contains(key) {
+                    deadlines.append(Deadline(title: title, date: JournalDate.startOfDay(date)))
+                    added = true
+                }
+            }
+        }
+        if added {
+            persist()
+        } else {
+            writeVaultFile()
+        }
+    }
+
+    private static func captures(_ s: String, _ pattern: String) -> [String]? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let ns = s as NSString
+        guard let m = regex.firstMatch(in: s, range: NSRange(location: 0, length: ns.length)),
+              m.numberOfRanges > 1
+        else { return nil }
+        return (1..<m.numberOfRanges).map { ns.substring(with: m.range(at: $0)) }
     }
 }

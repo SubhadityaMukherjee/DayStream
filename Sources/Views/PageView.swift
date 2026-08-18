@@ -225,8 +225,19 @@ struct PageView: View {
                      : mention.title)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
+                // First line rendered as markdown (the wikilink itself);
+                // remaining subtree lines show the block's real content.
                 MarkdownText(content: mention.lineText)
                     .font(.system(size: 13))
+                let extra = mention.blockLines.filter { $0 != mention.lineText }
+                if !extra.isEmpty {
+                    Text(extra.joined(separator: "\n"))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(7)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 2)
@@ -238,10 +249,10 @@ struct PageView: View {
     private func openMention(_ mention: VaultStore.Mention) {
         save()
         if let date = mention.date {
+            // Journal mention: close this sheet and reveal the day once the
+            // dismissal has finished (MainView's onDismiss consumes the queue).
+            appModel.queueReveal(day: date, createIfMissing: false)
             dismiss()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                appModel.reveal(day: date)
-            }
         } else {
             appModel.openPage = AppModel.PageRef(name: mention.title)
         }

@@ -114,7 +114,7 @@
     <li>Download <code>DayStream-macOS.zip</code> from the <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases">releases page</a> and unzip it.</li>
     <li>Move <strong>DayStream.app</strong> to <code>/Applications</code> (or <code>~/Applications</code>) and open it.</li>
     <li>Pick your vault — the folder that contains a <code>journals/</code> directory (a Logseq vault root works as-is).</li>
-    <li>That's it. Today's note is created automatically; double-click it and start typing.</li>
+    <li>That's it. A one-page welcome introduces the features; today's note is created automatically — double-click it and start typing.</li>
   </ol>
 
   <div class="toc">
@@ -177,9 +177,10 @@
 
   <h3 class="sub" id="settings">7. Settings &amp; maintenance</h3>
   <ul>
-    <li><strong>General:</strong> vault location, cross-note task syncing, and maintenance — delete empty notes, migrate legacy filenames.</li>
+    <li><strong>General:</strong> vault location, cross-note task syncing, automatic daily carry-forward, and maintenance — delete empty notes, migrate legacy filenames.</li>
     <li><strong>Fonts:</strong typeface (system / serif / rounded / monospace) and size for stream, headings and editor.</li>
     <li><strong>Recurring:</strong> add and remove recurring tasks and inspect their schedules.</li>
+    <li><strong>Advanced:</strong> git backup — commit the whole vault with one click and push it to your GitHub remote (requires git; credentials must already be configured).</li>
   </ul>
   <p>Filename migration renames <code>2026_08_18.md</code> / <code>18-08-2026.md</code> style journals to the canonical <code>2026-08-18.md</code>. Every original is copied to <code>backup/</code> first, and conflicting duplicates are skipped, never overwritten.</p>
 
@@ -219,7 +220,7 @@ cd daily_stream
   <table>
     <tr><td><strong>Will it touch my existing vault?</strong></td><td>Only when you edit. All writes are atomic; destructive operations (migration, cleanup) back up first or refuse to touch non-empty files. External edits are picked up live via file watching.</td></tr>
     <tr><td><strong>Can I use it together with Logseq?</strong></td><td>Yes — same file layout and syntax. A vault can round-trip between both apps. The filename migration is optional and always backs up to <code>backup/</code> first.</td></tr>
-    <tr><td><strong>Where do settings live?</strong></td><td>In macOS defaults (plist), never in the vault. The vault stays pure markdown.</td></tr>
+    <tr><td><strong>Where do settings live?</strong></td><td>App settings live in macOS defaults (plist), never in the vault. Deadlines are stored in defaults <em>and</em> mirrored to a human-editable <code>deadlines.md</code> in the vault root, so they travel with it.</td></tr>
     <tr><td><strong>What happens at midnight?</strong></td><td>A rollover timer creates the new day's note and seeds recurring tasks and deadlines due that day.</td></tr>
     <tr><td><strong>Is there an iOS / iPadOS app?</strong></td><td>Not yet — macOS 15+ only for now.</td></tr>
   </table>
