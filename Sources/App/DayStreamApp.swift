@@ -3,14 +3,22 @@ import SwiftUI
 @main
 struct DayStreamApp: App {
     @State private var appModel = AppModel()
+    @State private var settings = AppSettings.shared
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(appModel)
+                .environment(settings)
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unified(showsTitle: true))
+
+        Settings {
+            SettingsView()
+                .environment(appModel)
+                .environment(settings)
+        }
     }
 }
 

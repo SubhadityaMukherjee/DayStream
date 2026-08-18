@@ -2,6 +2,7 @@ import SwiftUI
 
 /// Renders one block (bullet, checkbox, content, properties) and its children.
 struct BlockRowView: View {
+    @Environment(AppSettings.self) private var settings
     let block: Block
     let file: VaultFile
     let store: VaultStore
@@ -15,13 +16,14 @@ struct BlockRowView: View {
             VStack(alignment: .leading, spacing: 2) {
                 if !block.isBullet, block.content.hasPrefix("#") {
                     MarkdownText(content: block.content)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(settings.streamFontSemibold)
                 } else {
                     MarkdownText(
                         content: block.content,
                         strikethrough: block.todoState == .done,
                         color: block.todoState == .done ? .secondary : .primary
                     )
+                    .font(settings.streamFont)
                 }
                 propertyBadges
                 bodyLines
@@ -41,17 +43,17 @@ struct BlockRowView: View {
         switch block.todoState {
         case .open:
             Button {
-                store.toggleTodo(in: file, block: block)
+                store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
             } label: {
                 Image(systemName: "square")
                     .font(.system(size: 13))
                     .foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
-            .help("Mark as done")
+            .help("Mark as done (⌘⏎ in editor toggles too)")
         case .done:
             Button {
-                store.toggleTodo(in: file, block: block)
+                store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
             } label: {
                 Image(systemName: "checkmark.square.fill")
                     .font(.system(size: 13))
@@ -109,7 +111,7 @@ struct BlockRowView: View {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if !trimmed.isEmpty, trimmed.range(of: "^[A-Za-z][A-Za-z0-9_-]*::", options: .regularExpression) == nil {
                     MarkdownText(content: trimmed)
-                        .font(.system(size: 12.5))
+                        .font(settings.streamFont)
                         .foregroundStyle(.secondary)
                 }
             }

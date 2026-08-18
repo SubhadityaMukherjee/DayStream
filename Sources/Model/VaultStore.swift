@@ -63,6 +63,8 @@ final class VaultStore {
 
     private var watchers: [DispatchSourceFileSystemObject] = []
     private var reloadWorkItem: DispatchWorkItem?
+    /// Skip watcher reloads briefly after our own writes (they'd be redundant).
+    private var lastSelfWrite: Date?
     let watchEnabled: Bool
 
     init(vaultURL: URL, watchEnabled: Bool = true) {
@@ -138,9 +140,15 @@ final class VaultStore {
     /// file next to an existing one.
     @discardableResult
     func ensureTodayFile() -> (url: URL, text: String) {
+        ensureDayFile(for: Date())
+    }
+
+    /// The canonical journal file for an arbitrary date, creating it if needed.
+    @discardableResult
+    func ensureDayFile(for date: Date) -> (url: URL, text: String) {
         let fm = FileManager.default
         var existing: [(url: URL, text: String)] = []
-        for name in JournalDate.allFilenames(for: Date()) {
+        for name in JournalDate.allFilenames(for: date) {
             let url = journalsURL.appendingPathComponent(name)
             guard fm.fileExists(atPath: url.path) else { continue }
             let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
@@ -149,7 +157,7 @@ final class VaultStore {
         if let best = existing.first(where: { !$0.text.isEmpty }) ?? existing.first {
             return best
         }
-        let url = todayURL
+        let url = journalsURL.appendingPathComponent(JournalDate.filename(for: date))
         try? "".write(to: url, atomically: true, encoding: .utf8)
         return (url, "")
     }
@@ -157,6 +165,7 @@ final class VaultStore {
     // MARK: - Writing
 
     func write(text: String, to url: URL) {
+        lastSelfWrite = Date()
         try? text.write(to: url, atomically: true, encoding: .utf8)
         refresh(fileURL: url, newText: text)
     }
@@ -175,9 +184,28 @@ final class VaultStore {
         }
     }
 
-    func toggleTodo(in file: VaultFile, block: Block) {
+    func toggleTodo(in file: VaultFile, block: Block, syncAcrossNotes: Bool = true) {
         let newText = BlockTree.toggledFileText(file.text, blockLineIndex: block.lineIndex)
         write(text: newText, to: file.url)
+        guard syncAcrossNotes, block.todoState != .none else { return }
+        let key = BlockTree.normalize(block.content)
+        guard !key.isEmpty else { return }
+        let target: TodoState = block.todoState == .done ? .open : .done
+        // Journals are in memory; pages are few and read on demand.
+        var others: [(url: URL, text: String)] = []
+        for day in days {
+            for f in day.files where f.url != file.url {
+                others.append((f.url, f.text))
+            }
+        }
+        for url in pageFileURLs() {
+            others.append((url, pageText(at: url)))
+        }
+        for other in others {
+            if let synced = BlockTree.syncedText(other.text, key: key, to: target) {
+                write(text: synced, to: other.url)
+            }
+        }
     }
 
     // MARK: - Carry forward
@@ -219,11 +247,149 @@ final class VaultStore {
         guard createIfMissing else { return nil }
         let url = pagesURL.appendingPathComponent(WikiName.fileName(for: trimmed))
         try? "".write(to: url, atomically: true, encoding: .utf8)
+        pageCount += 1
         return url
     }
 
     func pageText(at url: URL) -> String {
         (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    /// All page files currently in the vault's pages directory.
+    func pageFileURLs() -> [URL] {
+        let fm = FileManager.default
+        let names = ((try? fm.contentsOfDirectory(atPath: pagesURL.path)) ?? [])
+            .filter { $0.hasSuffix(".md") }
+            .sorted()
+        return names.map { pagesURL.appendingPathComponent($0) }
+    }
+
+    // MARK: - Linked references (mentions)
+
+    struct Mention: Identifiable {
+        let url: URL
+        let date: Date?
+        let title: String
+        let lineText: String
+        var id: String { url.absoluteString + ":" + lineText }
+    }
+
+    /// Every line in the vault (journals + pages) that links to `[[pageName]]`.
+    func mentions(of pageName: String) -> [Mention] {
+        let target = pageName.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !target.isEmpty else { return [] }
+        var out: [Mention] = []
+
+        for day in days {
+            for file in day.files {
+                for line in file.text.components(separatedBy: "\n") {
+                    if WikiName.references(line, page: target) {
+                        out.append(Mention(
+                            url: file.url,
+                            date: day.date,
+                            title: JournalDate.filename(for: day.date),
+                            lineText: line.trimmingCharacters(in: .whitespaces)
+                        ))
+                    }
+                }
+            }
+        }
+        for url in pageFileURLs() {
+            // Skip the page's own file: it isn't a reference to itself.
+            let name = url.deletingPathExtension().lastPathComponent
+            if name.lowercased() == WikiName.fileName(for: target).lowercased() { continue }
+            for line in pageText(at: url).components(separatedBy: "\n") {
+                if WikiName.references(line, page: target) {
+                    out.append(Mention(
+                        url: url,
+                        date: nil,
+                        title: WikiName.pageName(for: url.lastPathComponent),
+                        lineText: line.trimmingCharacters(in: .whitespaces)
+                    ))
+                }
+            }
+        }
+        return out
+    }
+
+    // MARK: - Maintenance
+
+    struct CleanupResult: Equatable {
+        var deletedJournals = 0
+        var deletedPages = 0
+        var freedBytes: Int64 = 0
+    }
+
+    /// Deletes journal and page files that contain nothing but whitespace.
+    /// Never touches any file with real content, however old.
+    @discardableResult
+    func deleteEmptyNotes(includeToday: Bool = false) -> CleanupResult {
+        let fm = FileManager.default
+        var result = CleanupResult()
+        let today = JournalDate.startOfDay(Date())
+
+        for day in days {
+            if !includeToday, day.date == today { continue }
+            for file in day.files {
+                guard file.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let size = ((try? fm.attributesOfItem(atPath: file.url.path))?[.size] as? Int64) ?? 0
+                if fm.removeItemIfPossible(file.url) {
+                    result.deletedJournals += 1
+                    result.freedBytes += size
+                }
+            }
+        }
+        for url in pageFileURLs() {
+            let text = pageText(at: url)
+            guard text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let size = ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int64) ?? 0
+            if fm.removeItemIfPossible(url) {
+                result.deletedPages += 1
+                result.freedBytes += size
+            }
+        }
+        if result.deletedJournals > 0 || result.deletedPages > 0 {
+            reload()
+        }
+        return result
+    }
+
+    // MARK: - Assets
+
+    /// Directory for dropped images/files, created on demand.
+    var assetsURL: URL {
+        let url: URL
+        switch layout {
+        case .root: url = vaultURL.appendingPathComponent("assets", isDirectory: true)
+        case .journalsDirectory: url = vaultURL.deletingLastPathComponent().appendingPathComponent("assets", isDirectory: true)
+        }
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// Copies a dropped image into `assets/` and returns the markdown embed
+    /// (`![](assets/...)`) to insert at the drop point.
+    @discardableResult
+    func importImage(_ data: Data, originalName: String?) -> String? {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "")
+        let sanitized = (originalName ?? "image")
+            .components(separatedBy: CharacterSet(charactersIn: "/\\:?%*|\"<>#[]"))
+            .joined(separator: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let nsName = sanitized as NSString
+        let stem = nsName.deletingPathExtension.trimmingCharacters(in: .whitespaces)
+        let ext = nsName.pathExtension.lowercased()
+        let base = stem.isEmpty ? "image" : stem
+        let extName = ext.isEmpty ? "png" : ext
+        let name = "\(stamp)_\(base).\(extName)"
+        let url = assetsURL.appendingPathComponent(name)
+        do {
+            try data.write(to: url, options: .atomic)
+            return "![](assets/\(name))"
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - File watching
@@ -252,6 +418,11 @@ final class VaultStore {
     private func scheduleReload() {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Our own writes already refreshed the store in place; a watcher
+            // reload right after would only duplicate work (and flicker).
+            if let last = self.lastSelfWrite, Date().timeIntervalSince(last) < 0.8 {
+                return
+            }
             self.reloadWorkItem?.cancel()
             let item = DispatchWorkItem { [weak self] in
                 self?.reload()
@@ -260,6 +431,13 @@ final class VaultStore {
             self.reloadWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
         }
+    }
+}
+
+private extension FileManager {
+    @discardableResult
+    func removeItemIfPossible(_ url: URL) -> Bool {
+        (try? removeItem(at: url)) != nil && !fileExists(atPath: url.path)
     }
 }
 

@@ -42,4 +42,27 @@ enum WikiName {
     static func candidateFileNames(for pageName: String) -> [String] {
         [fileName(for: pageName), pageName + ".md"]
     }
+
+    // MARK: - Wikilink scanning
+
+    private static let wikilinkRegex = try? NSRegularExpression(pattern: "\\[\\[([^\\[\\]]+)\\]\\]")
+
+    /// All `[[target]]` names appearing in the given text.
+    static func wikilinkTargets(in text: String) -> [String] {
+        guard let regex = wikilinkRegex else { return [] }
+        let ns = text as NSString
+        return regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .compactMap { m in
+                m.numberOfRanges > 1 ? ns.substring(with: m.range(at: 1)) : nil
+            }
+    }
+
+    /// True when the text contains `[[name]]` (case-insensitive, whitespace-trimmed).
+    static func references(_ text: String, page name: String) -> Bool {
+        let target = name.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !target.isEmpty else { return false }
+        return wikilinkTargets(in: text).contains {
+            $0.trimmingCharacters(in: .whitespaces).lowercased() == target
+        }
+    }
 }

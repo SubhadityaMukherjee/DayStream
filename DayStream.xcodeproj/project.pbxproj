@@ -13,8 +13,10 @@
 		2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86F2ED4411BBE44B6243822 /* DaySectionView.swift */; };
 		2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395EE5A200865344BF08F6C /* CalendarView.swift */; };
 		3A3F6731B5EA985E0F268EF4 /* WikiName.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF59C399937042AEE4E3CC43 /* WikiName.swift */; };
+		3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E42184F435A686A811D04BC /* SettingsView.swift */; };
 		3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7095D2E8BAAA3630B334211 /* MarkdownText.swift */; };
 		5985E748E9FB36A2A60E1C87 /* BlockTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6325935B942277AF6F6D0638 /* BlockTree.swift */; };
+		70F46FD8CBBF0B1194BB5553 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */; };
 		74926DDCBCC2C9ED8C04BA94 /* JournalDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5121535597CF66EE7B102F4 /* JournalDate.swift */; };
 		92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */; };
 		9C912F6BE0F04200CA889C9F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 348372FB8F5CCC693BB9F6BC /* Assets.xcassets */; };
@@ -25,6 +27,7 @@
 		C1595A58F8C302348B31E8A5 /* PageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 424E0ECF875895A3EC9513CA /* PageView.swift */; };
 		C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */; };
 		CBD6BD4307A96E2EA58EA5C2 /* BlockRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15757316319E7B2BC0AF72BD /* BlockRowView.swift */; };
+		CC95C10DB08ADCB0CB7B4941 /* VaultFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */; };
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
 /* End PBXBuildFile section */
@@ -40,6 +43,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		15757316319E7B2BC0AF72BD /* BlockRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockRowView.swift; sourceTree = "<group>"; };
 		2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayStreamApp.swift; sourceTree = "<group>"; };
@@ -51,7 +55,9 @@
 		6325935B942277AF6F6D0638 /* BlockTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockTree.swift; sourceTree = "<group>"; };
 		6395EE5A200865344BF08F6C /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalAndWikiTests.swift; sourceTree = "<group>"; };
+		6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultFeatureTests.swift; sourceTree = "<group>"; };
 		6B67635F43462BF67C2E4426 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
+		6E42184F435A686A811D04BC /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		7E026860706F7C832FDBE3CF /* VaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultStore.swift; sourceTree = "<group>"; };
 		97CB131027A4266DC2C0B9A6 /* DayStreamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DayStreamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7095D2E8BAAA3630B334211 /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
@@ -104,6 +110,7 @@
 				620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */,
 				69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */,
 				5D4BF23584F499B8D9BA92CE /* MultiFileDayTests.swift */,
+				6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */,
 			);
 			path = Tests;
 			sourceTree = "<group>";
@@ -126,6 +133,7 @@
 				478B8797070D7D84A9968027 /* MainView.swift */,
 				A7095D2E8BAAA3630B334211 /* MarkdownText.swift */,
 				424E0ECF875895A3EC9513CA /* PageView.swift */,
+				6E42184F435A686A811D04BC /* SettingsView.swift */,
 			);
 			path = Views;
 			sourceTree = "<group>";
@@ -134,6 +142,7 @@
 			isa = PBXGroup;
 			children = (
 				6B67635F43462BF67C2E4426 /* AppModel.swift */,
+				0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */,
 				2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */,
 				D28CCBC0CF4AC629300BDC1B /* SetupView.swift */,
 			);
@@ -254,6 +263,7 @@
 				135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */,
 				92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */,
 				BEF7AA884ACA542AA2659A1F /* MultiFileDayTests.swift in Sources */,
+				CC95C10DB08ADCB0CB7B4941 /* VaultFeatureTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,6 +272,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */,
+				70F46FD8CBBF0B1194BB5553 /* AppSettings.swift in Sources */,
 				CBD6BD4307A96E2EA58EA5C2 /* BlockRowView.swift in Sources */,
 				5985E748E9FB36A2A60E1C87 /* BlockTree.swift in Sources */,
 				2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */,
@@ -274,6 +285,7 @@
 				C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */,
 				3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */,
 				C1595A58F8C302348B31E8A5 /* PageView.swift in Sources */,
+				3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */,
 				B231746BDA28B33A89736FDE /* SetupView.swift in Sources */,
 				1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */,
 				3A3F6731B5EA985E0F268EF4 /* WikiName.swift in Sources */,

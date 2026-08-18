@@ -4,6 +4,7 @@ import SwiftUI
 /// markdown editor when editing. Saves are debounced.
 struct DaySectionView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
     let day: JournalDay
     let store: VaultStore
 
@@ -13,6 +14,7 @@ struct DaySectionView: View {
     /// external update). Used to detect external changes while editing.
     @State private var base = ""
     @State private var saveTask: Task<Void, Never>?
+    @State private var confirmDelete = false
 
     private var isToday: Bool {
         day.date == JournalDate.startOfDay(Date())
@@ -54,7 +56,7 @@ struct DaySectionView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(Self.dateFormatter.string(from: day.date))
-                .font(.system(size: 14, weight: .semibold))
+                .font(settings.streamFontSemibold)
             Text(Self.weekdayFormatter.string(from: day.date))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
@@ -73,6 +75,23 @@ struct DaySectionView: View {
                     .help("This date exists in multiple filename formats (e.g. 2026_08_14.md and 2026-08-14.md). Editing targets the file with content.")
             }
             Spacer()
+            if dayIsEmpty {
+                Button {
+                    confirmDelete = true
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Delete this empty note")
+                .confirmationDialog(
+                    "Delete the empty note for \(Self.dateFormatter.string(from: day.date))?",
+                    isPresented: $confirmDelete,
+                    titleVisibility: .visible
+                ) {
+                    Button("Delete Note", role: .destructive) { deleteEmptyDay() }
+                }
+            }
             Button {
                 if isEditing {
                     endEditing()
@@ -89,10 +108,21 @@ struct DaySectionView: View {
         .padding(.bottom, 2)
     }
 
+    private var dayIsEmpty: Bool {
+        day.files.allSatisfy { $0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
+    private func deleteEmptyDay() {
+        for file in day.files where file.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            try? FileManager.default.removeItem(at: file.url)
+        }
+        store.reload()
+    }
+
     @ViewBuilder
     private var content: some View {
         if isEditing {
-            MarkdownEditorView(text: $draft) { newText in
+            MarkdownEditorView(text: $draft, imageImporter: imageImporter) { newText in
                 scheduleSave(newText)
             } onCommit: {
                 endEditing()
@@ -148,6 +178,11 @@ struct DaySectionView: View {
         base = file.text
         isEditing = true
         appModel.editingDay = day.date
+    }
+
+    /// Dropped images are copied into the vault's assets/ directory and embedded.
+    private func imageImporter(_ data: Data, name: String?) -> String? {
+        store.importImage(data, originalName: name)
     }
 
     private func endEditing() {

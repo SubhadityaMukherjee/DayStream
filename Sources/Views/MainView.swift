@@ -65,6 +65,7 @@ struct MainView: View {
 
 private struct SidebarView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 12) {
@@ -100,26 +101,27 @@ private struct SidebarView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-
-                Button {
-                    appModel.disconnectVault()
-                } label: {
-                    Label("Change Vault…", systemImage: "folder.badge.gearshape")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.borderless)
-                .controlSize(.small)
-                .foregroundStyle(.secondary)
-                .padding(.top, 4)
             }
             .padding(.horizontal, 10)
 
             if let store = appModel.store {
                 Spacer()
-                Text("\(store.days.count) daily notes · \(store.pageCount) pages")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .padding(.bottom, 8)
+                HStack {
+                    Text("\(store.days.count) daily notes · \(store.pageCount) pages")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        openSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Settings (⌘,)")
+                }
+                .padding(.bottom, 8)
+                .padding(.horizontal, 10)
             }
         }
         .padding(.top, 12)

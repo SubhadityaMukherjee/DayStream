@@ -58,6 +58,16 @@ final class AppModel {
         reveal(day: today)
     }
 
+    /// Creates the journal file for a past/future date if missing, then reveals it.
+    func createDayNote(for date: Date) {
+        guard let store else { return }
+        store.ensureDayFile(for: date)
+        if !store.days.contains(where: { $0.date == date }) {
+            store.reload()
+        }
+        reveal(day: date)
+    }
+
     func reveal(day: Date) {
         // Make sure the target day is within the loaded window.
         if let store,

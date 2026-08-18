@@ -79,6 +79,8 @@ struct CalendarView: View {
         Button {
             if hasNote {
                 appModel.reveal(day: date)
+            } else {
+                appModel.createDayNote(for: date)
             }
         } label: {
             VStack(spacing: 1) {
@@ -101,7 +103,7 @@ struct CalendarView: View {
             )
         }
         .buttonStyle(.plain)
-        .help(hasNote ? "Jump to \(dateString(date))" : dateString(date) + " (no note)")
+        .help(hasNote ? "Jump to \(dateString(date))" : "Create a note for \(dateString(date))")
     }
 
     private var weekdaySymbols: [String] {

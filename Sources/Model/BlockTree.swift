@@ -16,7 +16,10 @@ struct BlockProperty {
 /// One outliner block: a bullet line plus its continuation body lines and
 /// property lines (`Key:: value`), plus child blocks at deeper indentation.
 struct Block: Identifiable {
-    let id: UUID
+    /// Stable identity: the block's line index in the file. Survives re-parses
+    /// (e.g. a todo toggle rewrites one line), so SwiftUI updates only the
+    /// affected rows instead of rebuilding every block in the day.
+    var id: String { "line-\(lineIndex)" }
     /// Index of the bullet line in the original file, for surgical edits.
     let lineIndex: Int
     let indent: Int
@@ -123,7 +126,6 @@ enum BlockTree {
                     stack.removeLast()
                 }
                 let entry = Entry(block: Block(
-                    id: UUID(),
                     lineIndex: i,
                     indent: bullet.indent,
                     isBullet: true,
@@ -149,7 +151,6 @@ enum BlockTree {
                 entries[last].block.rawLines.append(line)
             } else {
                 let entry = Entry(block: Block(
-                    id: UUID(),
                     lineIndex: i,
                     indent: indentUnits(line),
                     isBullet: false,
@@ -273,6 +274,36 @@ enum BlockTree {
             j += 1
         }
         return text
+    }
+
+    // MARK: - Cross-note todo syncing
+
+    /// Rewrites every todo block whose normalized content matches `key` so its
+    /// state becomes `state`. Returns nil when nothing needed changing.
+    static func syncedText(_ text: String, key: String, to state: TodoState) -> String? {
+        guard !key.isEmpty else { return nil }
+        var current = text
+        var changed = false
+        for _ in 0..<500 {
+            guard let match = firstTodoBlock(in: parse(current), key: key, notIn: state) else { break }
+            let updated = toggledFileText(current, blockLineIndex: match.lineIndex)
+            guard updated != current else { break }
+            current = updated
+            changed = true
+        }
+        return changed ? current : nil
+    }
+
+    private static func firstTodoBlock(in blocks: [Block], key: String, notIn state: TodoState) -> Block? {
+        for b in blocks {
+            if b.todoState != .none, b.todoState != state, normalize(b.content) == key {
+                return b
+            }
+            if let found = firstTodoBlock(in: b.children, key: key, notIn: state) {
+                return found
+            }
+        }
+        return nil
     }
 
     // MARK: - Carry-forward helpers
