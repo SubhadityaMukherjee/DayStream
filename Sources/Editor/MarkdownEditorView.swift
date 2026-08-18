@@ -6,8 +6,10 @@ import AppKit
 /// - Tab / Shift-Tab indent / outdent the current line
 /// - `/todo `, `/doing `, `/later `, `/done ` expand to TODO-style markers
 /// - Escape ends editing (and flushes the pending save)
+/// - ⌘S saves-and-quits via `onSaveCommit` (callers normalize text first)
 /// - ⌘K links the selection (URL on the clipboard -> `[text](url)`, else `[[wikilink]]`)
 /// - ⌘⏎ toggles the current line's TODO/DONE marker
+/// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
 /// - Live highlighting of markers, `[[wikilinks]]`, code spans, headings
 struct MarkdownEditorView: NSViewRepresentable {
@@ -15,8 +17,11 @@ struct MarkdownEditorView: NSViewRepresentable {
     var font: NSFont = AppSettings.shared.editorFont()
     /// Importer for dropped images; nil disables image importing.
     var imageImporter: ((Data, String?) -> String?)? = nil
+    /// Existing `[[page]]` names for autocomplete; nil disables suggestions.
+    var pageNamesProvider: (() -> [String])? = nil
     var onTextChanged: ((String) -> Void)? = nil
     var onCommit: (() -> Void)? = nil
+    var onSaveCommit: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> EditorScrollView {
         let tv = EditorTextView()
@@ -34,7 +39,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.string = text
         tv.delegate = context.coordinator
         tv.onCommit = onCommit
+        tv.onSaveCommit = onSaveCommit
         tv.imageImporter = imageImporter
+        tv.pageNamesProvider = pageNamesProvider
         tv.highlight()
         context.coordinator.installSpaceMonitor(for: tv)
 
@@ -54,6 +61,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     static func dismantleNSView(_ nsView: EditorScrollView, coordinator: Coordinator) {
         coordinator.removeSpaceMonitor()
+        nsView.editor?.closeSuggestions()
     }
 
     func updateNSView(_ nsView: EditorScrollView, context: Context) {
@@ -68,7 +76,9 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
         nsView.invalidateIntrinsicContentSize()
         tv.onCommit = onCommit
+        tv.onSaveCommit = onSaveCommit
         tv.imageImporter = imageImporter
+        tv.pageNamesProvider = pageNamesProvider
     }
 
     func makeCoordinator() -> Coordinator {
@@ -123,6 +133,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             parent.text = tv.string
             parent.onTextChanged?(tv.string)
             isEditingLocally = false
+            (tv as? EditorTextView)?.updateSuggestions()
         }
     }
 }
@@ -143,7 +154,10 @@ final class EditorScrollView: NSScrollView {
 
 final class EditorTextView: NSTextView {
     var onCommit: (() -> Void)?
+    var onSaveCommit: (() -> Void)?
     var imageImporter: ((Data, String?) -> String?)? = nil
+    var pageNamesProvider: (() -> [String])? = nil
+    private var suggest: WikiSuggestController?
 
     private var slashMarkers: [String: String] {
         ["/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE"]
@@ -167,6 +181,11 @@ final class EditorTextView: NSTextView {
             makeLinkFromSelectionOrClipboard()
             return true
         }
+        if event.keyCode == Keyboard.s, modifiers == .command {
+            closeSuggestions()
+            onSaveCommit?()
+            return true
+        }
         if event.keyCode == Keyboard.returnKey, modifiers == .command {
             toggleTodoOnCurrentLine()
             return true
@@ -185,6 +204,7 @@ final class EditorTextView: NSTextView {
     private enum Keyboard {
         static let space: UInt16 = 49
         static let k: UInt16 = 40
+        static let s: UInt16 = 1
         static let b: UInt16 = 11
         static let i: UInt16 = 34
         static let returnKey: UInt16 = 36
@@ -192,7 +212,11 @@ final class EditorTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // escape
-            onCommit?()
+            if suggestionsShown {
+                closeSuggestions()
+            } else {
+                onCommit?()
+            }
             return
         }
         super.keyDown(with: event)
@@ -205,6 +229,7 @@ final class EditorTextView: NSTextView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        closeSuggestions()
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
     }
@@ -295,9 +320,99 @@ final class EditorTextView: NSTextView {
         selectedRange = NSRange(location: range.location + prefix.count, length: selected.count)
     }
 
+    // MARK: - `[[wikilink]]` autocomplete
+
+    private var suggestionsShown: Bool {
+        suggest?.isShown ?? false
+    }
+
+    func closeSuggestions() {
+        suggest?.close()
+    }
+
+    /// Detects an open `[[prefix` at the caret and shows matching page names
+    /// in a popover anchored above the caret. Called after every text change.
+    func updateSuggestions() {
+        guard let provider = pageNamesProvider, window?.firstResponder === self else {
+            closeSuggestions()
+            return
+        }
+        guard let context = openWikiContext() else {
+            closeSuggestions()
+            return
+        }
+        let lower = context.prefix.lowercased()
+        let matches = provider().filter { lower.isEmpty || $0.lowercased().hasPrefix(lower) }
+        guard !matches.isEmpty else {
+            closeSuggestions()
+            return
+        }
+
+        if suggest == nil {
+            let controller = WikiSuggestController()
+            controller.onPick = { [weak self] name in
+                self?.completeWikiLink(name)
+            }
+            suggest = controller
+        }
+        suggest!.items = Array(matches.prefix(6))
+        suggest!.show(for: self, caretRect: caretRectForCaret(at: context.bracketStart))
+    }
+
+    /// Screen-space-free caret rect (view coordinates) for a character index.
+    private func caretRectForCaret(at charIndex: Int) -> CGRect {
+        guard let layoutManager, let container = textContainer else {
+            return .zero
+        }
+        let charRange = NSRange(location: charIndex, length: 0)
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: container)
+        rect.origin.x += textContainerInset.width
+        rect.origin.y += textContainerInset.height
+        return rect.integral
+    }
+
+    /// The `[[` opening before the caret with no closing `]]` yet, if any.
+    /// Returns the location of `[[` and the typed prefix since it.
+    private func openWikiContext() -> (bracketStart: Int, prefix: String)? {
+        let s = string as NSString
+        let caret = selectedRange()
+        guard caret.length == 0, caret.location > 0 else { return nil }
+        let lineStart = s.lineRange(for: NSRange(location: caret.location - 1, length: 0)).location
+        let before = s.substring(with: NSRange(location: lineStart, length: caret.location - lineStart)) as NSString
+        let found = before.range(of: "[[", options: .backwards)
+        guard found.location != NSNotFound else { return nil }
+        let prefix = before.substring(from: found.location + 2)
+        // Closed link or nested bracket: not an autocomplete target.
+        if prefix.contains("]]") || prefix.contains("[") { return nil }
+        return (lineStart + found.location, prefix)
+    }
+
+    private func completeWikiLink(_ name: String) {
+        closeSuggestions()
+        guard let context = openWikiContext() else { return }
+        let caret = selectedRange()
+        let replaceRange = NSRange(location: context.bracketStart, length: caret.location - context.bracketStart)
+        let replacement = "[[\(name)]]"
+        shouldChangeText(in: replaceRange, replacementString: replacement)
+        textStorage?.replaceCharacters(in: replaceRange, with: replacement)
+        didChangeText()
+        let after = context.bracketStart + (replacement as NSString).length
+        selectedRange = NSRange(location: after, length: 0)
+    }
+
+    private func completeSelectedSuggestion() {
+        guard let suggest, let name = suggest.selectedName else { return }
+        completeWikiLink(name)
+    }
+
     // MARK: - Outliner behaviors
 
     override func insertNewline(_ sender: Any?) {
+        if suggestionsShown {
+            completeSelectedSuggestion()
+            return
+        }
         let s = string as NSString
         let caret = selectedRange().location
         let lineStart = (s.lineRange(for: NSRange(location: min(caret, s.length), length: 0)).location)
@@ -336,6 +451,10 @@ final class EditorTextView: NSTextView {
     }
 
     override func insertTab(_ sender: Any?) {
+        if suggestionsShown {
+            completeSelectedSuggestion()
+            return
+        }
         let s = string as NSString
         let caret = selectedRange().location
         let lineRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
@@ -474,6 +593,22 @@ final class EditorTextView: NSTextView {
         return cleaned.isEmpty ? "link" : cleaned
     }
 
+    override func moveUp(_ sender: Any?) {
+        if suggestionsShown {
+            suggest?.moveSelection(-1)
+            return
+        }
+        super.moveUp(sender)
+    }
+
+    override func moveDown(_ sender: Any?) {
+        if suggestionsShown {
+            suggest?.moveSelection(1)
+            return
+        }
+        super.moveDown(sender)
+    }
+
     // MARK: - Syntax highlighting
 
     private var markerColors: [String: NSColor] {
@@ -553,5 +688,130 @@ final class EditorTextView: NSTextView {
             .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .bold),
         ])
         storage.endEditing()
+    }
+}
+
+// MARK: - Wikilink suggestion popover
+
+/// Transient NSPopover listing candidate page names above the caret.
+/// Keyboard navigation is owned by the text view (moveUp/moveDown/enter/tab),
+/// so the content view refuses first responder to keep typing uninterrupted.
+final class WikiSuggestController: NSObject {
+    private let popover = NSPopover()
+    private let listView = SuggestListView()
+    private let hostView = NSView()
+
+    var onPick: ((String) -> Void)?
+
+    var items: [String] = [] {
+        didSet {
+            listView.items = items
+            selected = items.isEmpty ? 0 : min(selected, items.count - 1)
+            listView.selected = selected
+            syncSize()
+        }
+    }
+
+    var selected: Int = 0
+
+    var selectedName: String? {
+        items.indices.contains(selected) ? items[selected] : nil
+    }
+
+    var isShown: Bool {
+        popover.isShown
+    }
+
+    override init() {
+        super.init()
+        listView.onPick = { [weak self] index in
+            guard let self, self.items.indices.contains(index) else { return }
+            self.onPick?(self.items[index])
+        }
+        hostView.addSubview(listView)
+        popover.contentViewController = NSViewController()
+        popover.contentViewController?.view = hostView
+        popover.behavior = .transient
+        popover.hasFullSizeContent = true
+    }
+
+    func show(for textView: NSView, caretRect: CGRect) {
+        guard !items.isEmpty else { return }
+        listView.selected = selected
+        syncSize()
+        if !popover.isShown {
+            // Slight vertical inset so the popover's arrow sits over the caret.
+            let anchor = caretRect.insetBy(dx: 0, dy: 0).offsetBy(dx: 0, dy: -1)
+            popover.show(relativeTo: anchor, of: textView, preferredEdge: .minY)
+        }
+    }
+
+    func close() {
+        if popover.isShown {
+            popover.performClose(nil)
+        }
+        selected = 0
+    }
+
+    func moveSelection(_ delta: Int) {
+        guard !items.isEmpty else { return }
+        selected = (selected + delta + items.count) % items.count
+        listView.selected = selected
+        listView.needsDisplay = true
+    }
+
+    private func syncSize() {
+        let size = listView.intrinsicContentSize
+        hostView.frame = NSRect(origin: .zero, size: size)
+        listView.frame = hostView.frame
+        popover.contentSize = size
+    }
+}
+
+/// Self-drawing suggestion rows; keeps the popover lightweight and keeps
+/// keyboard focus with the editor.
+final class SuggestListView: NSView {
+    var items: [String] = [] {
+        didSet { needsDisplay = true }
+    }
+    var selected: Int = 0 {
+        didSet { needsDisplay = true }
+    }
+    var onPick: ((Int) -> Void)?
+
+    private let rowHeight: CGFloat = 24
+    private var font = NSFont.systemFont(ofSize: 12.5)
+
+    override var acceptsFirstResponder: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        for (i, item) in items.enumerated() {
+            let y = bounds.height - CGFloat(i + 1) * rowHeight
+            let row = CGRect(x: 0, y: y, width: bounds.width, height: rowHeight)
+            let isSelected = i == selected
+            if isSelected {
+                NSColor.controlAccentColor.setFill()
+                row.fill()
+            }
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: isSelected ? NSColor.white : NSColor.labelColor,
+            ]
+            (item as NSString).draw(in: row.insetBy(dx: 9, dy: 0), withAttributes: attrs)
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let index = Int((bounds.height - p.y) / rowHeight)
+        if items.indices.contains(index) {
+            onPick?(index)
+        }
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let widths = items.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
+        let width = min(max((widths.max() ?? 0) + 20, 140), 340)
+        return NSSize(width: width, height: CGFloat(max(items.count, 1)) * rowHeight)
     }
 }

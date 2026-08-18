@@ -122,11 +122,20 @@ struct DaySectionView: View {
     @ViewBuilder
     private var content: some View {
         if isEditing {
-            MarkdownEditorView(text: $draft, imageImporter: imageImporter) { newText in
-                scheduleSave(newText)
-            } onCommit: {
-                endEditing()
-            }
+            MarkdownEditorView(
+                text: $draft,
+                imageImporter: imageImporter,
+                pageNamesProvider: { [weak store] in store?.allPageNames() ?? [] },
+                onTextChanged: { newText in
+                    scheduleSave(newText)
+                },
+                onCommit: {
+                    endEditing()
+                },
+                onSaveCommit: {
+                    saveAndQuit()
+                }
+            )
             .padding(.horizontal, -6)
             .transition(.opacity)
         } else {
@@ -137,9 +146,8 @@ struct DaySectionView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
-            .onTapGesture(count: 2) {
-                startEditing()
-            }
+            // Simultaneous so single clicks still reach `[[wikilinks]]`.
+            .simultaneousGesture(TapGesture(count: 2).onEnded { startEditing() })
         }
     }
 
@@ -166,9 +174,9 @@ struct DaySectionView: View {
         }
         .padding(.vertical, 6)
         .contentShape(.rect)
-        .onTapGesture(count: 2) {
+        .simultaneousGesture(TapGesture(count: 2).onEnded {
             if isToday { startEditing() }
-        }
+        })
     }
 
     private func startEditing() {
@@ -187,6 +195,25 @@ struct DaySectionView: View {
 
     private func endEditing() {
         flushSave()
+        isEditing = false
+        if appModel.editingDay == day.date {
+            appModel.editingDay = nil
+        }
+    }
+
+    /// ⌘S: normalize the draft (drop empty bullets, space out top-level
+    /// `[[wikilink]]` groups, stamp `added::` on today's new tasks), write it,
+    /// and leave edit mode.
+    private func saveAndQuit() {
+        saveTask?.cancel()
+        guard let file = editFile else {
+            endEditing()
+            return
+        }
+        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
+        draft = normalized
+        base = normalized
+        store.write(text: normalized, to: file.url)
         isEditing = false
         if appModel.editingDay == day.date {
             appModel.editingDay = nil

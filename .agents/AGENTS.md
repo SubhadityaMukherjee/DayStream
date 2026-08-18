@@ -19,13 +19,19 @@ DayStream is a native macOS (SwiftUI + AppKit) daily-notes app that reads/writes
 | Area | Files |
 |---|---|
 | Outliner parse / todo toggle / sync | `Sources/Model/BlockTree.swift` |
-| Vault I/O, watching, migration, cleanup, mentions | `Sources/Model/VaultStore.swift` |
+| Vault I/O, watching, migration, cleanup, mentions, search, task insertion | `Sources/Model/VaultStore.swift` |
 | Journal filename formats | `Sources/Model/JournalDate.swift` (ISO `yyyy-MM-dd.md` is canonical) |
 | Carry-forward algorithm | `Sources/Model/CarryForward.swift` |
 | Wikilink ↔ filename mapping | `Sources/Model/WikiName.swift` |
+| Date-like wikilink parsing (`[[Aug 18th, 2026]]`) | `Sources/Model/WikiDate.swift` |
+| `added::`/`completed::` stamps, durations, ⌘S normalization | `Sources/Model/NoteFormatter.swift` |
+| Recurring tasks (daily/weekly/once) + store | `Sources/Model/RecurringTask.swift` |
+| Deadlines + store | `Sources/Model/Deadline.swift` |
 | Stream UI | `Sources/Views/DailyStreamView.swift` → `DaySectionView` → `BlockRowView` |
-| Editor (AppKit) | `Sources/Editor/MarkdownEditorView.swift` |
-| App shell / menu bar / settings | `Sources/App/` |
+| Sidebar, search bar, deadlines UI | `Sources/Views/MainView.swift` |
+| Page sheets (rendered + editor) | `Sources/Views/PageView.swift` |
+| Editor (AppKit) + `[[` autocomplete popover | `Sources/Editor/MarkdownEditorView.swift` |
+| App shell / app model (scheduling, rollover) / menu bar / settings | `Sources/App/` |
 | Tests | `Tests/*.swift` |
 
 ## Tricky spots
@@ -34,6 +40,10 @@ DayStream is a native macOS (SwiftUI + AppKit) daily-notes app that reads/writes
 - **Editing vs. external changes:** `DaySectionView` keeps `draft` + `base`; external text is adopted only when the user hasn't typed since the last sync, so a stale editor can never clobber disk.
 - **Same date, multiple filename formats:** a day can exist as `2026_08_18.md` and `18-08-2026.md`. `JournalDay.editFile` picks the content-bearing one; `editFile`/`displayFiles` must be used instead of `files.first`.
 - **Watcher debounce:** `VaultStore.lastSelfWrite` suppresses watcher reloads for ~0.8s after our own writes to avoid redundant reloads/flicker.
+- **Autocomplete popover:** `WikiSuggestController`'s list view refuses first responder so typing is never interrupted; keyboard nav is owned by `EditorTextView` (moveUp/moveDown/insertNewline/insertTab). Escape closes the popover before ending editing.
+- **PageView toggles:** page files aren't in `VaultStore.days`, so `PageView.toggleOnPage` re-reads the file text after toggling instead of waiting for store updates.
+- **Scheduled seeding:** `AppModel.applyScheduledForToday` runs on vault setup, Today, `createDayNote`, and a 60s midnight-rollover timer. All seeding goes through `VaultStore.addTask`, which duplicate-checks against the note's content keys — that's what makes repeated application safe.
+- **UserDefaults-backed app state:** recurring tasks and deadlines live in defaults (JSON), never in the vault — the vault stays pure markdown.
 
 ## Scripts
 

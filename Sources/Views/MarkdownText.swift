@@ -26,7 +26,16 @@ struct MarkdownText: View {
                 result += chunk
             case .wiki(let name):
                 var link = AttributedString(name)
-                link.link = URL(string: "daystream://page?name=" + encodeName(name))
+                // Date-like wikilinks ([[Aug 18th, 2026]], [[2026-08-18]]) jump
+                // to that day in the stream; everything else opens the page.
+                if let day = WikiDate.parse(name) {
+                    let f = DateFormatter()
+                    f.locale = Locale(identifier: "en_US_POSIX")
+                    f.dateFormat = "yyyy-MM-dd"
+                    link.link = URL(string: "daystream://date?value=" + f.string(from: day))
+                } else {
+                    link.link = URL(string: "daystream://page?name=" + encodeName(name))
+                }
                 link.foregroundColor = .accentColor
                 link.underlineStyle = .single
                 if strikethrough {

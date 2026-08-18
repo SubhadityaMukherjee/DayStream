@@ -1,13 +1,16 @@
 import SwiftUI
 import AppKit
 
-/// Menu bar applet (window style): quick-add a task to today's journal and
-/// see/toggle today's open todos without opening the main window.
+/// Menu bar applet (window style): quick-add a task to today's journal (or
+/// schedule it for a picked date) and see/toggle today's open todos without
+/// opening the main window.
 struct MenuBarPanel: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
     @Environment(\.openWindow) private var openWindow
     @State private var quickAdd = ""
+    @State private var scheduling = false
+    @State private var scheduledDate = JournalDate.startOfDay(Date())
 
     var body: some View {
         Group {
@@ -57,28 +60,51 @@ struct MenuBarPanel: View {
     }
 
     private var quickAddField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "plus.circle")
-                .foregroundStyle(.secondary)
-            TextField("Quick add a task for today…", text: $quickAdd)
-                .font(.system(size: 13))
-                .onSubmit(submitQuickAdd)
-            if !quickAdd.isEmpty {
-                Button(action: submitQuickAdd) {
-                    Image(systemName: "return")
-                        .font(.system(size: 11, weight: .semibold))
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "plus.circle")
+                    .foregroundStyle(.secondary)
+                TextField("Quick add a task for today…", text: $quickAdd)
+                    .font(.system(size: 13))
+                    .onSubmit(submitQuickAdd)
+                if !quickAdd.isEmpty {
+                    Button(action: submitQuickAdd) {
+                        Image(systemName: "return")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help(scheduling ? "Add to the selected date" : "Add to today's journal")
+                }
+                Button {
+                    scheduling.toggle()
+                } label: {
+                    Image(systemName: scheduling ? "calendar.badge.checkmark" : "calendar")
+                        .font(.system(size: 12))
+                        .foregroundStyle(scheduling ? Color.accentColor : .secondary)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Add to today's journal")
+                .help(scheduling ? "Add to today instead" : "Schedule for a specific date")
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(.quaternary.opacity(0.35))
+            )
+
+            if scheduling {
+                DatePicker(
+                    "Date",
+                    selection: $scheduledDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.field)
+                .font(.system(size: 12))
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(.quaternary.opacity(0.35))
-        )
     }
 
     @ViewBuilder
@@ -132,15 +158,13 @@ struct MenuBarPanel: View {
     private func submitQuickAdd() {
         let text = quickAdd.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, let store = appModel.store else { return }
-        let (url, existing) = store.ensureTodayFile()
-        let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
-        let entry = "- TODO " + text
-        let newText = trimmed.isEmpty ? entry + "\n" : trimmed + "\n" + entry + "\n"
-        store.write(text: newText, to: url)
-        if !store.days.contains(where: { $0.date == JournalDate.startOfDay(Date()) }) {
+        let target: Date = scheduling ? scheduledDate : Date()
+        store.addTask(text, to: target, atTop: false)
+        if !store.days.contains(where: { $0.date == JournalDate.startOfDay(target) }) {
             store.reload()
         }
         quickAdd = ""
+        scheduling = false
     }
 
     private func openMainWindow() {

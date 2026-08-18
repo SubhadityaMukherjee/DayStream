@@ -4,86 +4,233 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DayStream — a daily-notes stream for your markdown vault</title>
+<meta name="description" content="DayStream is a fast, native macOS daily-notes app over a plain markdown vault. Logseq-compatible, plain files, no lock-in.">
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-    margin: 0; line-height: 1.6; color: #1d1d1f;
+    margin: 0; line-height: 1.65; color: #1d1d1f;
     background: #fbfbfd;
   }
-  .dark body, body:has(#dark-proxy) { }
   @media (prefers-color-scheme: dark) {
     body { color: #f5f5f7; background: #1c1c1e; }
     a { color: #6cb2ff; }
     .card { background: #2c2c2e !important; border-color: #3a3a3c !important; }
-    .hero-emoji { filter: none; }
+    pre { background: #000 !important; }
+    nav.nav { background: rgba(28,28,30,.85) !important; border-color: #3a3a3c !important; }
+    :root { --nav-bg: rgba(251,251,253,.85); }
   }
-  .wrap { max-width: 820px; margin: 0 auto; padding: 0 24px 80px; }
-  .hero { text-align: center; padding: 72px 0 40px; }
+  nav.nav {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(251,251,253,.85); backdrop-filter: blur(12px);
+    border-bottom: 1px solid #e5e5ea;
+  }
+  nav.nav .inner {
+    max-width: 860px; margin: 0 auto; padding: 10px 24px;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  }
+  nav.nav .brand { font-weight: 700; font-size: 15px; text-decoration: none; color: inherit; }
+  nav.nav a.link { font-size: 13.5px; color: #6e6e73; text-decoration: none; }
+  nav.nav a.link:hover { color: #0066cc; }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 0 24px 80px; }
+  .hero { text-align: center; padding: 64px 0 36px; }
   .hero img { width: 128px; height: 128px; border-radius: 28px; box-shadow: 0 12px 40px rgba(0,0,0,.18); }
   h1 { font-size: 40px; margin: 24px 0 8px; letter-spacing: -0.5px; }
-  .tagline { font-size: 19px; color: #6e6e73; margin: 0 0 28px; }
-  .badges a { text-decoration: none; margin: 0 4px; }
+  .tagline { font-size: 19px; color: #6e6e73; margin: 0 0 24px; }
+  .badges { margin-bottom: 8px; }
+  .badges a { text-decoration: none; margin: 0 3px; display: inline-block; }
+  .badges img { display: block; height: 20px; }
   .cta { display: inline-block; background: #0071e3; color: #fff !important; padding: 12px 26px;
          border-radius: 980px; font-weight: 600; text-decoration: none; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin: 40px 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin: 40px 0; }
   .card { background: #fff; border: 1px solid #e5e5ea; border-radius: 14px; padding: 18px 20px; }
   .card h3 { margin: 0 0 6px; font-size: 16px; }
   .card p { margin: 0; font-size: 14px; color: #6e6e73; }
-  h2 { margin-top: 56px; font-size: 26px; letter-spacing: -0.3px; }
+  h2 { margin-top: 64px; font-size: 26px; letter-spacing: -0.3px; scroll-margin-top: 70px; }
+  h3.sub { margin-top: 32px; font-size: 18px; }
+  p, li { font-size: 15.5px; }
   pre { background: #f2f2f7; border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13px; }
-  @media (prefers-color-scheme: dark) { pre { background: #000; } }
-  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-  li { margin: 4px 0; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .92em; }
+  p code, li code, td code { background: rgba(120,120,128,.12); padding: 2px 5px; border-radius: 5px; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #e5e5ea; vertical-align: top; }
+  @media (prefers-color-scheme: dark) { th, td { border-color: #3a3a3c; } }
+  th { color: #6e6e73; font-weight: 600; }
+  .kbd { font-family: ui-monospace, Menlo, monospace; font-size: 12px; border: 1px solid #d2d2d7;
+         border-bottom-width: 2px; border-radius: 5px; padding: 1px 6px; background: #fff; white-space: nowrap; }
+  @media (prefers-color-scheme: dark) { .kbd { background: #2c2c2e; border-color: #48484a; } }
   a { color: #0066cc; }
+  .toc { background: #fff; border: 1px solid #e5e5ea; border-radius: 14px; padding: 16px 22px; margin-top: 24px; }
+  .toc ol { margin: 8px 0 0; padding-left: 20px; }
+  .toc a { text-decoration: none; }
+  .footer-note { margin-top: 64px; color: #6e6e73; font-size: 13px; }
 </style>
 </head>
 <body>
+<nav class="nav">
+  <div class="inner">
+    <a class="brand" href="#">DayStream</a>
+    <a class="link" href="#features">Features</a>
+    <a class="link" href="#getting-started">Get started</a>
+    <a class="link" href="#guide">Guide</a>
+    <a class="link" href="#shortcuts">Shortcuts</a>
+    <a class="link" href="#vault-format">Vault format</a>
+    <a class="link" href="#faq">FAQ</a>
+    <a class="link" href="https://github.com/SubhadityaMukherjee/daily_stream/releases">Download</a>
+  </div>
+</nav>
 <div class="wrap">
+
   <div class="hero">
     <img src="icon.png" alt="DayStream app icon" onerror="this.style.display='none'">
     <h1>DayStream</h1>
-    <p class="tagline">A fast, native daily-notes stream for your existing markdown vault. Logseq-compatible, plain files, no lock-in.</p>
+    <p class="tagline">A fast, native daily-notes stream for your existing markdown vault.<br>Logseq-compatible, plain files, no lock-in.</p>
     <p>
       <a class="cta" href="https://github.com/SubhadityaMukherjee/daily_stream/releases">Download for macOS</a>
     </p>
     <p class="badges">
-      <a href="https://github.com/SubhadityaMukherjee/daily_stream/actions"><img src="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml/badge.svg" alt="Build"></a>
-      <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases"><img src="https://img.shields.io/github/v/release/SubhadityaMukherjee/daily_stream" alt="Release"></a>
+      <a href="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml"><img src="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+      <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases/latest"><img src="https://img.shields.io/github/v/release/SubhadityaMukherjee/daily_stream?display_name=tag&amp;sort=semver" alt="Latest release"></a>
+      <a href="https://github.com/SubhadityaMukherjee/daily_stream"><img src="https://img.shields.io/badge/platform-macOS%2015%2B-333" alt="Platform"></a>
     </p>
   </div>
 
-  <div class="grid">
+  <div class="grid" id="features">
     <div class="card"><h3>One endless stream</h3><p>All your daily notes in a single scroll, newest first. Click a calendar day to jump anywhere.</p></div>
     <div class="card"><h3>Plain markdown</h3><p>Notes are ordinary <code>.md</code> files in <code>journals/</code>. Works alongside Logseq or any editor.</p></div>
-    <div class="card"><h3>Outliner tasks</h3><p>TODO / DOING / DONE markers, nested bullets, cross-note task syncing, and one-click carry-forward to today.</p></div>
-    <div class="card"><h3>[[Wikilinks]] &amp; pages</h3><p>Click a wikilink to open (or create) a page, with Logseq-style linked references.</p></div>
-    <div class="card"><h3>Menu bar quick add</h3><p>Capture a task for today from the menu bar without switching apps.</p></div>
-    <div class="card"><h3>Native &amp; fast</h3><p>SwiftUI + AppKit on macOS 15+. No Electron, no cloud account.</p></div>
+    <div class="card"><h3>Outliner tasks</h3><p>TODO / DOING / DONE markers, nested bullets, cross-note task syncing, and one-click carry-forward.</p></div>
+    <div class="card"><h3>Task timing</h3><p>New tasks record when they were added; finished tasks show how long they took, right next to them.</p></div>
+    <div class="card"><h3>Recurring &amp; deadlines</h3><p>Daily / weekly / one-off tasks seed themselves on top of the day's note. Deadlines stay pinned in the sidebar.</p></div>
+    <div class="card"><h3>[[Wikilinks]] &amp; pages</h3><p>Click a link to open a rendered page with Logseq-style linked references. Date links jump to that day.</p></div>
+    <div class="card"><h3>Search everything</h3><p>One search bar across every journal and page; results jump straight to the day or page.</p></div>
+    <div class="card"><h3>Menu bar quick add</h3><p>Capture a task for today — or schedule it to any date — without switching apps.</p></div>
+    <div class="card"><h3>Native &amp; fast</h3><p>SwiftUI + AppKit on macOS 15+. No Electron, no cloud account, no database.</p></div>
   </div>
 
-  <h2>Getting started</h2>
+  <h2 id="getting-started">Getting started</h2>
   <ol>
     <li>Download <code>DayStream-macOS.zip</code> from the <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases">releases page</a> and unzip it.</li>
     <li>Move <strong>DayStream.app</strong> to <code>/Applications</code> (or <code>~/Applications</code>) and open it.</li>
     <li>Pick your vault — the folder that contains a <code>journals/</code> directory (a Logseq vault root works as-is).</li>
-    <li>That's it. Today's note is created automatically; start typing.</li>
+    <li>That's it. Today's note is created automatically; double-click it and start typing.</li>
   </ol>
 
-  <h2>Building from source</h2>
-  <pre><code>git clone https://github.com/SubhadityaMukherjee/daily_stream.git
+  <div class="toc">
+    <strong>Documentation</strong>
+    <ol>
+      <li><a href="#stream">The stream &amp; calendar</a></li>
+      <li><a href="#editing">Editing notes</a></li>
+      <li><a href="#tasks">Tasks, timing &amp; syncing</a></li>
+      <li><a href="#recurring">Recurring tasks &amp; deadlines</a></li>
+      <li><a href="#wikilinks">Wikilinks, pages &amp; search</a></li>
+      <li><a href="#menubar">Menu bar &amp; quick capture</a></li>
+      <li><a href="#settings">Settings &amp; maintenance</a></li>
+      <li><a href="#shortcuts">Keyboard shortcuts</a></li>
+      <li><a href="#vault-format">Vault format &amp; Logseq compatibility</a></li>
+      <li><a href="#building">Building from source</a></li>
+      <li><a href="#faq">FAQ</a></li>
+    </ol>
+  </div>
+
+  <h2 id="guide">Usage guide</h2>
+
+  <h3 class="sub" id="stream">1. The stream &amp; calendar</h3>
+  <p>The main window is one continuous, reverse-chronological stream of your daily notes — today at the top, history below, loading more as you scroll. The sidebar calendar shows which days have notes; days with open tasks get an orange dot. Click a day to jump to it (and create it if it doesn't exist yet), or press <strong>Today</strong> to come back. The stream updates live when files change on disk, so it's safe to edit the vault from other tools at the same time.</p>
+
+  <h3 class="sub" id="editing">2. Editing notes</h3>
+  <p>Double-click a day (or the pencil button in its header) to edit it in place. The editor is a full outliner:</p>
+  <ul>
+    <li><span class="kbd">Enter</span> continues the current bullet; on an empty bullet it exits the list.</li>
+    <li><span class="kbd">Tab</span> / <span class="kbd">⇧Tab</span> indent / outdent lines.</li>
+    <li>Slash commands expand as you type: <code>/todo</code>, <code>/doing</code>, <code>/later</code>, <code>/now</code>, <code>/done</code>.</li>
+    <li>Dropped images are copied into <code>assets/</code> and embedded; dropped files and web links become markdown links.</li>
+    <li><span class="kbd">⌘S</span> saves <em>and</em> closes the editor, tidying as it goes: empty <code>-</code> lines are removed and top-level <code>[[wikilink]]</code> groups are separated by a blank line.</li>
+  </ul>
+
+  <h3 class="sub" id="tasks">3. Tasks, timing &amp; syncing</h3>
+  <p>Tasks are Logseq-style markers — <code>- TODO ship the paper</code>, <code>DOING</code>, <code>LATER</code>, <code>NOW</code>, <code>DONE</code> — or <code>Status::</code> property lines. Click a checkbox to toggle it.</p>
+  <ul>
+    <li><strong>Cross-note syncing:</strong> checking a task updates the same task (matching text) in every other note, journals and pages alike. Toggle it in Settings.</li>
+    <li><strong>Timing:</strong> tasks added via quick capture, recurring seeding, or <span class="kbd">⌘S</span> on today's note get an <code>added::</code> timestamp. Completing a task stamps <code>completed::</code>, and the stream shows a small duration capsule (e.g. <code>2h 15m</code>) next to the finished task.</li>
+    <li><strong>Carry forward:</strong> the button copies every unfinished task from previous days into today's note, preserving nesting and skipping duplicates.</li>
+  </ul>
+
+  <h3 class="sub" id="recurring">4. Recurring tasks &amp; deadlines</h3>
+  <p>Both live in <strong>Settings → Recurring</strong> and the sidebar.</p>
+  <ul>
+    <li><strong>Recurring tasks</strong> repeat daily, weekly on a chosen weekday, or once on a date. On the day they're due, they appear as a <code>TODO</code> at the <em>top</em> of that day's note. Seeding is duplicate-checked, so re-running never doubles up — and completing the task keeps it done.</li>
+    <li><strong>Deadlines</strong> (sidebar <strong>Deadline…</strong> button) pin a dated item in the sidebar until you remove it: upcoming ones counted down (<code>Tomorrow</code>, <code>Fri</code>, <code>Aug 30</code>), today's highlighted, overdue ones in red. Clicking a deadline jumps to its day; the task itself is seeded into that day's note.</li>
+  </ul>
+
+  <h3 class="sub" id="wikilinks">5. Wikilinks, pages &amp; search</h3>
+  <ul>
+    <li>Typing <code>[[</code> suggests existing page names — pick with <span class="kbd">↑</span>/<span class="kbd">↓</span>, complete with <span class="kbd">Enter</span> or <span class="kbd">Tab</span>.</li>
+    <li>Clicking a wikilink opens the page as a rendered, front-page-style view with <strong>Linked References</strong> (every mention across the vault). Edit toggles the raw editor.</li>
+    <li>Date-shaped links like <code>[[Aug 18th, 2026]]</code> or <code>[[2026-08-18]]</code> jump to that day's note in the stream instead.</li>
+    <li>The <strong>search bar</strong> above the stream searches every journal and page at once; journal hits jump to their day, page hits open the page.</li>
+  </ul>
+
+  <h3 class="sub" id="menubar">6. Menu bar &amp; quick capture</h3>
+  <p>The menu bar icon opens a compact panel: quick-add a task for today, or toggle the calendar button to schedule it for any date. Below, today's open tasks are listed and toggleable without opening the main window.</p>
+
+  <h3 class="sub" id="settings">7. Settings &amp; maintenance</h3>
+  <ul>
+    <li><strong>General:</strong> vault location, cross-note task syncing, and maintenance — delete empty notes, migrate legacy filenames.</li>
+    <li><strong>Fonts:</strong typeface (system / serif / rounded / monospace) and size for stream, headings and editor.</li>
+    <li><strong>Recurring:</strong> add and remove recurring tasks and inspect their schedules.</li>
+  </ul>
+  <p>Filename migration renames <code>2026_08_18.md</code> / <code>18-08-2026.md</code> style journals to the canonical <code>2026-08-18.md</code>. Every original is copied to <code>backup/</code> first, and conflicting duplicates are skipped, never overwritten.</p>
+
+  <h2 id="shortcuts">Keyboard shortcuts</h2>
+  <table>
+    <tr><th>Shortcut</th><th>Where</th><th>Action</th></tr>
+    <tr><td><span class="kbd">⌘S</span></td><td>Editor</td><td>Save, tidy (drop empty bullets, space wikilink groups) and close</td></tr>
+    <tr><td><span class="kbd">⎋</span></td><td>Editor</td><td>Save and close (dismisses autocomplete first)</td></tr>
+    <tr><td><span class="kbd">⌘⏎</span></td><td>Editor</td><td>Toggle TODO / DONE on the current line</td></tr>
+    <tr><td><span class="kbd">⌘K</span></td><td>Editor</td><td>Link selection (clipboard URL → link, else <code>[[wikilink]]</code>)</td></tr>
+    <tr><td><span class="kbd">⌘B</span> / <span class="kbd">⌘I</span></td><td>Editor</td><td>Bold / italic</td></tr>
+    <tr><td><span class="kbd">Tab</span> / <span class="kbd">⇧Tab</span></td><td>Editor</td><td>Indent / outdent (or accept autocomplete)</td></tr>
+    <tr><td><span class="kbd">↑</span> / <span class="kbd">↓</span></td><td>Editor</td><td>Navigate page-name suggestions while typing <code>[[</code></td></tr>
+    <tr><td><span class="kbd">⌘,</span></td><td>Anywhere</td><td>Open settings</td></tr>
+  </table>
+
+  <h2 id="vault-format">Vault format &amp; Logseq compatibility</h2>
+  <p>DayStream expects a folder containing <code>journals/</code> (a Logseq vault root works unchanged), or the <code>journals/</code> folder itself. It creates <code>pages/</code>, <code>assets/</code> and <code>backup/</code> alongside as needed.</p>
+<pre><code>vault/
+├── journals/          one markdown file per day
+│   ├── 2026-08-17.md
+│   └── 2026-08-18.md
+├── pages/             [[wikilink]] targets
+├── assets/            dropped images
+└── backup/            safety copies from migration</code></pre>
+  <p>Journal filenames: <code>yyyy-MM-dd.md</code> is canonical for new files; <code>yyyy_MM_dd.md</code> and <code>dd-MM-yyyy.md</code> are read transparently (and can be migrated in one click). Everything else — markers, properties (<code>Key:: value</code>), indentation — is plain Logseq markdown, so you can round-trip a vault between the two apps freely. The only DayStream-specific conventions are the optional <code>added::</code> / <code>completed::</code> timestamp properties, which Logseq simply shows as properties.</p>
+
+  <h2 id="building">Building from source</h2>
+<pre><code>git clone https://github.com/SubhadityaMukherjee/daily_stream.git
 cd daily_stream
-./scripts/build_and_install release   # builds, installs to ~/Applications, launches</code></pre>
-  <p>Requires Xcode 16+ (macOS 15 SDK). <a href="https://github.com/SubhadityaMukherjee/daily_stream/blob/develop/README.md">Full details in the README.</a></p>
+./scripts/build_and_install            # Debug build → ~/Applications → launch
+./scripts/build_and_install release    # Release build
+./scripts/build_and_install test       # Build + run unit tests</code></pre>
+  <p>Requires Xcode 16+ (macOS 15 SDK); the script installs <a href="https://github.com/yonaskolb/XcodeGen">XcodeGen</a> via Homebrew on first run. The checked-in <code>.xcodeproj</code> is generated from <code>project.yml</code>.</p>
+
+  <h2 id="faq">FAQ</h2>
+  <table>
+    <tr><td><strong>Will it touch my existing vault?</strong></td><td>Only when you edit. All writes are atomic; destructive operations (migration, cleanup) back up first or refuse to touch non-empty files. External edits are picked up live via file watching.</td></tr>
+    <tr><td><strong>Can I use it together with Logseq?</strong></td><td>Yes — same file layout and syntax. A vault can round-trip between both apps. The filename migration is optional and always backs up to <code>backup/</code> first.</td></tr>
+    <tr><td><strong>Where do settings live?</strong></td><td>In macOS defaults (plist), never in the vault. The vault stays pure markdown.</td></tr>
+    <tr><td><strong>What happens at midnight?</strong></td><td>A rollover timer creates the new day's note and seeds recurring tasks and deadlines due that day.</td></tr>
+    <tr><td><strong>Is there an iOS / iPadOS app?</strong></td><td>Not yet — macOS 15+ only for now.</td></tr>
+  </table>
 
   <h2>Branching &amp; releases</h2>
   <ul>
     <li><strong>develop</strong> — active development; CI builds and tests every push.</li>
-    <li><strong>main</strong> — stable; releases are tagged from it (<code>v1.0.0</code>, <code>v1.1.0</code>, …) and published as GitHub Releases.</li>
+    <li><strong>main</strong> — stable; releases are tagged from it (<code>v1.0.0</code>, <code>v1.1.0</code>, …) and published as GitHub Releases automatically.</li>
   </ul>
 
-  <p style="margin-top:56px;color:#6e6e73;font-size:13px">DayStream is a personal project by Subhaditya Mukherjee.</p>
+  <p class="footer-note">DayStream is a personal project by Subhaditya Mukherjee. Found an issue? <a href="https://github.com/SubhadityaMukherjee/daily_stream/issues">Open one on GitHub</a>.</p>
 </div>
 </body>
 </html>

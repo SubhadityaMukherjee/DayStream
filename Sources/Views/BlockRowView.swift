@@ -6,6 +6,8 @@ struct BlockRowView: View {
     let block: Block
     let file: VaultFile
     let store: VaultStore
+    /// Overrides the default toggle (pages refresh their own text after it).
+    var onToggle: ((Block) -> Void)? = nil
 
     private static let indentWidth: CGFloat = 18
 
@@ -21,12 +23,15 @@ struct BlockRowView: View {
                     MarkdownText(content: block.content)
                         .font(settings.headingFont(level: headingLevel))
                 } else {
-                    MarkdownText(
-                        content: block.content,
-                        strikethrough: block.todoState == .done,
-                        color: block.todoState == .done ? .secondary : .primary
-                    )
-                    .font(settings.streamFont)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        MarkdownText(
+                            content: block.content,
+                            strikethrough: block.todoState == .done,
+                            color: block.todoState == .done ? .secondary : .primary
+                        )
+                        .font(settings.streamFont)
+                        durationBadge
+                    }
                 }
                 propertyBadges
                 bodyLines
@@ -37,8 +42,22 @@ struct BlockRowView: View {
         .padding(.vertical, 1)
 
         ForEach(block.children) { child in
-            BlockRowView(block: child, file: file, store: store)
+            BlockRowView(block: child, file: file, store: store, onToggle: onToggle)
         }
+    }
+
+    private func toggle() {
+        if let onToggle {
+            onToggle(block)
+        } else {
+            store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
+        }
+    }
+
+    /// `added::` / `completed::` are internal bookkeeping for durations;
+    /// everything else shows as a badge.
+    private var hiddenPropertyKeys: Set<String> {
+        ["added", "completed"]
     }
 
     /// Outliner-style vertical guide rails, one per ancestor indent level.
@@ -68,34 +87,45 @@ struct BlockRowView: View {
     private var markerView: some View {
         switch block.todoState {
         case .open:
-            Button {
-                store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
-            } label: {
+            Button(action: toggle) {
                 Image(systemName: "square")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13.5, weight: .light))
                     .foregroundStyle(.secondary)
+                    .frame(width: 18, height: 18)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
             .help("Mark as done (⌘⏎ in editor toggles too)")
         case .done:
-            Button {
-                store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
-            } label: {
+            Button(action: toggle) {
                 Image(systemName: "checkmark.square.fill")
-                    .font(.system(size: 13))
+                    .font(.system(size: 13.5))
                     .foregroundStyle(.green)
+                    .frame(width: 18, height: 18)
+                    .contentShape(.rect)
             }
             .buttonStyle(.plain)
-            .help("Mark as todo")
+            .help(durationHelp ?? "Mark as todo")
         case .none:
             if block.isBullet {
                 Text(Self.bulletSymbol(level: block.indent))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: bulletSize))
+                    .foregroundStyle(block.indent == 0 ? Color.accentColor.opacity(0.75) : .secondary)
+                    .padding(.top, bulletNudge)
+                    .frame(width: 18, height: 18, alignment: .center)
             } else {
                 EmptyView()
             }
         }
+    }
+
+    private var bulletSize: CGFloat {
+        max(10, settings.fontSize - 2.5)
+    }
+
+    /// Optical alignment of the glyph against the first text line.
+    private var bulletNudge: CGFloat {
+        settings.fontSize <= 14 ? 0.5 : 2
     }
 
     /// Classic outliner bullets that cycle with depth: •, ◦, ▪.
@@ -103,11 +133,60 @@ struct BlockRowView: View {
         ["•", "◦", "▪"][level % 3]
     }
 
+    // MARK: - Completion duration
+
+    /// Time a finished task took, from its `added::` stamp to `completed::`.
+    @ViewBuilder
+    private var durationBadge: some View {
+        if let duration = completionDuration {
+            HStack(spacing: 3) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 8.5))
+                Text(duration)
+                    .monospacedDigit()
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.green)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Color.green.opacity(0.12)))
+            .help(durationHelp ?? "")
+        }
+    }
+
+    private var completionDuration: String? {
+        guard block.todoState == .done,
+              let added = propertyValue("added"),
+              let completed = propertyValue("completed"),
+              let a = NoteFormatter.parseTimestamp(added),
+              let c = NoteFormatter.parseTimestamp(completed),
+              c >= a
+        else { return nil }
+        return NoteFormatter.duration(from: a, to: c)
+    }
+
+    private var durationHelp: String? {
+        guard let added = propertyValue("added"),
+              let completed = propertyValue("completed"),
+              let a = NoteFormatter.parseTimestamp(added),
+              let c = NoteFormatter.parseTimestamp(completed)
+        else { return nil }
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return "Added \(f.string(from: a)) · Completed \(f.string(from: c))"
+    }
+
+    private func propertyValue(_ key: String) -> String? {
+        block.properties.first { $0.key.lowercased() == key }?.value
+    }
+
     @ViewBuilder
     private var propertyBadges: some View {
-        if !block.properties.isEmpty {
+        let visible = block.properties.filter { !hiddenPropertyKeys.contains($0.key.lowercased()) }
+        if !visible.isEmpty {
             HStack(spacing: 6) {
-                ForEach(block.properties, id: \.key) { prop in
+                ForEach(visible, id: \.key) { prop in
                     HStack(spacing: 3) {
                         Text(prop.key)
                             .font(.caption2)

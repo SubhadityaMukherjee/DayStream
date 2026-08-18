@@ -10,9 +10,11 @@ final class AppModel {
     var editingDay: Date?
     var scrollToDay: Date?
     var openPage: PageRef?
-    var showNewNote = false
     var carrySummary: CarryResult?
     var carryButtonPulse = false
+
+    let recurring = RecurringTaskStore()
+    let deadlines = DeadlineStore()
 
     struct PageRef: Identifiable {
         let name: String
@@ -21,6 +23,9 @@ final class AppModel {
 
     var isConfigured: Bool { store != nil }
 
+    private var lastAppliedDay: Date?
+    private var dayTickTimer: Timer?
+
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.vaultPathKey) {
             let url = URL(fileURLWithPath: path)
@@ -28,6 +33,7 @@ final class AppModel {
                 setupVault(at: url)
             }
         }
+        startDayTimer()
     }
 
     func setupVault(at url: URL) {
@@ -38,6 +44,7 @@ final class AppModel {
         loadedDays = 60
         editingDay = nil
         ensureTodayExists()
+        applyScheduledForToday()
     }
 
     func disconnectVault() {
@@ -54,14 +61,18 @@ final class AppModel {
 
     func goToToday() {
         ensureTodayExists()
+        applyScheduledForToday()
         let today = JournalDate.startOfDay(Date())
         reveal(day: today)
     }
 
-    /// Creates the journal file for a past/future date if missing, then reveals it.
+    /// Creates the journal file for a past/future date if missing, seeds any
+    /// recurring tasks and deadlines due that day, then reveals it.
     func createDayNote(for date: Date) {
         guard let store else { return }
         store.ensureDayFile(for: date)
+        store.applyRecurringTasks(recurring.tasks, to: date)
+        store.applyDeadlines(deadlines.deadlines, to: date)
         if !store.days.contains(where: { $0.date == date }) {
             store.reload()
         }
@@ -93,5 +104,27 @@ final class AppModel {
         let result = store.carryForward()
         carrySummary = result
         ensureTodayExists()
+    }
+
+    // MARK: - Scheduled work (recurring + deadlines)
+
+    private func applyScheduledForToday() {
+        guard let store else { return }
+        store.applyRecurringTasks(recurring.tasks, to: Date())
+        store.applyDeadlines(deadlines.deadlines, to: Date())
+        ensureTodayExists()
+        lastAppliedDay = JournalDate.startOfDay(Date())
+    }
+
+    /// Catches midnight rollover while the app is open: reloads the vault and
+    /// seeds the new day's note (today's file + recurring tasks + deadlines).
+    private func startDayTimer() {
+        dayTickTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let today = JournalDate.startOfDay(Date())
+            guard today != self.lastAppliedDay else { return }
+            self.store?.reload()
+            self.applyScheduledForToday()
+        }
     }
 }
