@@ -437,44 +437,48 @@ final class VaultStore {
         let url: URL
         let date: Date?
         let title: String
+        /// The matching line, trimmed (usually the wikilink bullet).
         let lineText: String
+        /// All lines of the matching block's subtree — the block's real text
+        /// on that day, children included (capped).
+        var blockLines: [String] = []
         var id: String { url.absoluteString + ":" + lineText }
     }
 
-    /// Every line in the vault (journals + pages) that links to `[[pageName]]`.
+    /// Every block in the vault (journals + pages) that links to `[[pageName]]`.
     func mentions(of pageName: String) -> [Mention] {
         let target = pageName.trimmingCharacters(in: .whitespaces).lowercased()
         guard !target.isEmpty else { return [] }
         var out: [Mention] = []
 
-        for day in days {
-            for file in day.files {
-                for line in file.text.components(separatedBy: "\n") {
-                    if WikiName.references(line, page: target) {
+        func collect(_ url: URL, date: Date?, title: String, text: String) {
+            for root in BlockTree.parse(text) {
+                func walk(_ b: Block) {
+                    if let line = b.rawLines.first(where: { WikiName.references($0, page: target) }) {
                         out.append(Mention(
-                            url: file.url,
-                            date: day.date,
-                            title: JournalDate.filename(for: day.date),
-                            lineText: line.trimmingCharacters(in: .whitespaces)
+                            url: url,
+                            date: date,
+                            title: title,
+                            lineText: line.trimmingCharacters(in: .whitespaces),
+                            blockLines: BlockTree.subtreeLines(b, maxLines: 8)
                         ))
                     }
+                    b.children.forEach(walk)
                 }
+                walk(root)
+            }
+        }
+
+        for day in days {
+            for file in day.files {
+                collect(file.url, date: day.date, title: JournalDate.filename(for: day.date), text: file.text)
             }
         }
         for url in pageFileURLs() {
             // Skip the page's own file: it isn't a reference to itself.
             let name = url.deletingPathExtension().lastPathComponent
             if name.lowercased() == WikiName.fileName(for: target).lowercased() { continue }
-            for line in pageText(at: url).components(separatedBy: "\n") {
-                if WikiName.references(line, page: target) {
-                    out.append(Mention(
-                        url: url,
-                        date: nil,
-                        title: WikiName.pageName(for: url.lastPathComponent),
-                        lineText: line.trimmingCharacters(in: .whitespaces)
-                    ))
-                }
-            }
+            collect(url, date: nil, title: WikiName.pageName(for: url.lastPathComponent), text: pageText(at: url))
         }
         return out
     }
@@ -572,14 +576,22 @@ final class VaultStore {
 
     /// Vault-level backup directory (`<vault root>/backup`), created on demand.
     func backupDirectory() -> URL {
-        let root: URL
-        switch layout {
-        case .root: root = vaultURL
-        case .journalsDirectory: root = vaultURL.deletingLastPathComponent()
-        }
-        let url = root.appendingPathComponent("backup", isDirectory: true)
+        let url = vaultRootURL.appendingPathComponent("backup", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
+    }
+
+    /// The vault root regardless of which folder was selected as the vault.
+    var vaultRootURL: URL {
+        switch layout {
+        case .root: return vaultURL
+        case .journalsDirectory: return vaultURL.deletingLastPathComponent()
+        }
+    }
+
+    /// Markdown mirror of the sidebar deadlines, in the vault root.
+    var deadlinesFileURL: URL {
+        vaultRootURL.appendingPathComponent("deadlines.md")
     }
 
     /// Deletes journal and page files that contain nothing but whitespace.

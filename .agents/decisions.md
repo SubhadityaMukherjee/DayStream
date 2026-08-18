@@ -61,3 +61,18 @@ Quick-add, recurring injection, and ⌘S on *today's* note stamp open tasks with
 ## Docs site
 
 `docs/index.html` is the entire GitHub Pages site (single file, no build step; dark mode via `prefers-color-scheme`). Badges must reference things that exist — the repo has no LICENSE file, so no license badge. `docs/icon.png` is a copy of the app icon.
+
+## Post-v1.2.0 behaviors
+
+- **Stream bullets:** plain markdown-style dash at the content font size (baseline-aligns without nudges); guide rails still carry depth.
+- **Scroll-to-day reliability:** `scrollToDay` is consumed (nulled) on receipt so repeat requests fire; `DailyStreamView.scrollTo` retries at 0.05/0.2/0.5s because LazyVStack realizes target sections late (search hits + Today after midnight).
+- **Settings deep-link:** `AppModel.requestedSettingsTab` + tagged `TabView` selection; sidebar "Recurring Tasks…" opens Settings on that tab.
+- **Month picker:** calendar month title is a popover button → `MonthYearPicker` (year stepper + 12-month grid).
+- **Auto carry-forward:** `AppSettings.autoCarryForward` (default on). Runs once per local day — guarded by `lastAppliedDay` in `applyScheduledForToday` — so relaunching the app the same day never duplicates; `setupVault` resets the guard so a fresh vault connection applies it.
+
+## v1.3.0 additions
+
+- **Linked references:** `VaultStore.mentions` is block-based now — each mention carries `blockLines` (subtree text via `BlockTree.subtreeLines`, capped at 8 lines) so rows show the block's real content from that day, not just the wikilink line. One mention per block (dedupes repeated links in one block).
+- **Welcome window:** one-page Apple-style popup on first launch only (`AppSettings.hasSeenWelcome`), sheet on RootView.
+- **Deadlines mirror:** `DeadlineStore` still uses UserDefaults as behavioral source of truth but mirrors to `<vault root>/deadlines.md` (`- [yyyy-MM-dd] Title`) on every change; `syncWithVaultFile()` merges hand-edited entries when a vault connects (union by title+date, local-timezone dates).
+- **Git backup (Settings → Advanced):** `GitBackup` wraps the git CLI — `add -A`, commit "backing up files", `push`, with `GIT_TERMINAL_PROMPT=0` so it fails instead of hanging on credential prompts. Repo folder is auto-detected up to 4 levels above the vault root (repo may be a parent folder) and can be overridden via NSOpenPanel; path persists in `AppSettings.gitBackupPath`. Result surfaces in an alert (success/failure with git's tail output).

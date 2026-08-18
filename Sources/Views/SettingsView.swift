@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// The app's preferences window (⌘,). Vault location, fonts, task syncing,
 /// and vault maintenance (empty-note cleanup).
@@ -10,25 +11,42 @@ struct SettingsView: View {
     @State private var migrationSummary: VaultStore.MigrationResult?
     @State private var confirmMigrate = false
 
+    @State private var selectedTab = 0
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             GeneralTab(
                 cleanupSummary: $cleanupSummary,
                 confirmMigrate: $confirmMigrate,
                 migrationSummary: $migrationSummary
             )
             .tabItem { Label("General", systemImage: "gearshape") }
+            .tag(AppModel.SettingsTab.general.rawValue)
             FontTab()
                 .tabItem { Label("Fonts", systemImage: "textformat") }
+                .tag(AppModel.SettingsTab.fonts.rawValue)
             RecurringTab()
                 .tabItem { Label("Recurring", systemImage: "repeat") }
+                .tag(AppModel.SettingsTab.recurring.rawValue)
+            AdvancedTab()
+                .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
+                .tag(AppModel.SettingsTab.advanced.rawValue)
         }
         .frame(width: 460)
+        .onAppear { consumeRequestedTab() }
+        .onChange(of: appModel.requestedSettingsTab) { _, _ in consumeRequestedTab() }
         .sheet(item: $cleanupSummary) { result in
             CleanupAlert(result: result)
         }
         .sheet(item: $migrationSummary) { result in
             MigrationAlert(result: result)
+        }
+    }
+
+    private func consumeRequestedTab() {
+        if let requested = appModel.requestedSettingsTab {
+            selectedTab = requested.rawValue
+            appModel.requestedSettingsTab = nil
         }
     }
 }
@@ -98,6 +116,10 @@ private struct GeneralTab: View {
             Section("Tasks") {
                 Toggle("Sync task state across notes", isOn: $settings.syncTodosAcrossNotes)
                 Text("Checking a task updates every note that repeats the same task text — journals and pages alike.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Toggle("Carry forward unfinished tasks each day", isOn: $settings.autoCarryForward)
+                Text("When a new day starts (app launch or midnight rollover), unfinished tasks from previous days are copied into the new day's note automatically. Never duplicates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -295,5 +317,135 @@ private struct RecurringTab: View {
         }
         appModel.recurring.add(RecurringTask(title: trimmed, schedule: schedule))
         title = ""
+    }
+}
+
+/// Git-backed vault backup: detect or pick the repository folder (which may
+/// be a parent of the vault), then commit everything and push via the git CLI.
+private struct AdvancedTab: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
+    @State private var backupResult: GitBackup.Result?
+    @State private var isBackingUp = false
+
+    private var repoURL: URL? {
+        let path = settings.gitBackupPath
+        return path.isEmpty ? nil : URL(fileURLWithPath: path)
+    }
+
+    private var repoIsValid: Bool {
+        repoURL.map { GitBackup.isGitRepo($0) } ?? false
+    }
+
+    var body: some View {
+        Form {
+            Section("Git Backup") {
+                if !GitBackup.gitAvailable {
+                    Label("git is not installed on this Mac — backup is unavailable.", systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let url = repoURL {
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                            Text(url.path)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        } else {
+                            Text("No repository selected").foregroundStyle(.secondary)
+                        }
+                        if let url = repoURL {
+                            Label(repoIsValid ? "git repository" : "not a git repository",
+                                  systemImage: repoIsValid ? "checkmark.circle" : "xmark.circle")
+                                .font(.caption2)
+                                .foregroundStyle(repoIsValid ? .green : .secondary)
+                                .help("Looking for .git in \(url.path)")
+                        }
+                    }
+                    Spacer()
+                    Button("Choose…") { chooseFolder() }
+                    if let detected = detectedRepo, detected.path != settings.gitBackupPath {
+                        Button("Use \(detected.lastPathComponent)") {
+                            settings.gitBackupPath = detected.path
+                        }
+                    }
+                }
+
+                Button {
+                    runBackup()
+                } label: {
+                    if isBackingUp {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("Backing Up…")
+                        }
+                    } else {
+                        Text("Back Up Now")
+                    }
+                }
+                .disabled(!GitBackup.gitAvailable || !repoIsValid || isBackingUp)
+
+                Text("Runs git add -A, commits with the message “\(GitBackup.commitMessage)”, and pushes to the repository's remote.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Warnings") {
+                Text("• Everything under the repository folder is committed — if the repo is a parent folder, unrelated files in it are included too.\n• Push goes to the remote's configured branch; your credentials (SSH key or HTTPS credential helper) must already be set up — DayStream will not prompt for passwords.\n• Requires git to be installed (it ships with the Xcode Command Line Tools).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460, height: 430)
+        .onAppear { autoDetectRepo() }
+        .alert(
+            backupResult?.success == true ? "Backup Finished" : "Backup Failed",
+            isPresented: Binding(
+                get: { backupResult != nil },
+                set: { if !$0 { backupResult = nil } }
+            )
+        ) {
+            Button("OK") { backupResult = nil }
+        } message: {
+            Text(backupResult?.message ?? "")
+        }
+    }
+
+    /// First repo at/above the vault (vault itself, or a parent folder).
+    private var detectedRepo: URL? {
+        appModel.store.map { GitBackup.containingRepo(for: $0.vaultRootURL) } ?? nil
+    }
+
+    private func autoDetectRepo() {
+        guard settings.gitBackupPath.isEmpty, let repo = detectedRepo else { return }
+        settings.gitBackupPath = repo.path
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Pick the git repository folder (it may be the parent of your vault)"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        settings.gitBackupPath = url.path
+    }
+
+    private func runBackup() {
+        guard let repo = repoURL else { return }
+        isBackingUp = true
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = GitBackup.backup(repo: repo)
+            DispatchQueue.main.async {
+                backupResult = result
+                isBackingUp = false
+            }
+        }
     }
 }

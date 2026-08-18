@@ -108,29 +108,16 @@ struct BlockRowView: View {
             .help(durationHelp ?? "Mark as todo")
         case .none:
             if block.isBullet {
-                Text(Self.bulletSymbol(level: block.indent))
-                    .font(.system(size: bulletSize))
-                    .foregroundStyle(block.indent == 0 ? Color.accentColor.opacity(0.75) : .secondary)
-                    .padding(.top, bulletNudge)
+                // Markdown-style dash, matching the source text; same font
+                // size as the content line so it baseline-aligns naturally.
+                Text("-")
+                    .font(.system(size: settings.fontSize, weight: .medium))
+                    .foregroundStyle(.tertiary)
                     .frame(width: 18, height: 18, alignment: .center)
             } else {
                 EmptyView()
             }
         }
-    }
-
-    private var bulletSize: CGFloat {
-        max(10, settings.fontSize - 2.5)
-    }
-
-    /// Optical alignment of the glyph against the first text line.
-    private var bulletNudge: CGFloat {
-        settings.fontSize <= 14 ? 0.5 : 2
-    }
-
-    /// Classic outliner bullets that cycle with depth: •, ◦, ▪.
-    private static func bulletSymbol(level: Int) -> String {
-        ["•", "◦", "▪"][level % 3]
     }
 
     // MARK: - Completion duration

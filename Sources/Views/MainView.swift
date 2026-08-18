@@ -32,7 +32,9 @@ struct MainView: View {
                 return .systemAction
             }
         )
-        .sheet(item: $appModel.openPage) { page in
+        .sheet(item: $appModel.openPage, onDismiss: {
+            appModel.consumePendingReveal()
+        }) { page in
             PageView(pageName: page.name)
                 .id(page.name)
                 .frame(minWidth: 560, minHeight: 460)
@@ -68,15 +70,12 @@ struct MainView: View {
                 f.locale = Locale(identifier: "en_US_POSIX")
                 f.dateFormat = "yyyy-MM-dd"
                 if let date = f.date(from: value) {
-                    // If a page sheet is open, close it first so the reveal
-                    // is visible in the stream behind it.
-                    let hadPage = appModel.openPage != nil
-                    appModel.openPage = nil
                     let target = JournalDate.startOfDay(date)
-                    if hadPage {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            appModel.createDayNote(for: target)
-                        }
+                    // If a page sheet is open, close it and reveal once the
+                    // dismissal completes; otherwise reveal right away.
+                    if appModel.openPage != nil {
+                        appModel.queueReveal(day: target, createIfMissing: true)
+                        appModel.openPage = nil
                     } else {
                         appModel.createDayNote(for: target)
                     }
@@ -129,6 +128,15 @@ private struct SidebarView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
+
+                Button {
+                    openRecurringSettings()
+                } label: {
+                    Label("Recurring Tasks…", systemImage: "repeat")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
             }
             .padding(.horizontal, 12)
 
@@ -159,6 +167,11 @@ private struct SidebarView: View {
             NewDeadlineSheet()
                 .frame(minWidth: 380, minHeight: 240)
         }
+    }
+
+    private func openRecurringSettings() {
+        appModel.requestedSettingsTab = .recurring
+        openSettings()
     }
 
     /// Persistent deadline list, soonest first. Click jumps to that day's
