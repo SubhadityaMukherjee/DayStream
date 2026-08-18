@@ -36,6 +36,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.onCommit = onCommit
         tv.imageImporter = imageImporter
         tv.highlight()
+        context.coordinator.installSpaceMonitor(for: tv)
 
         let scroll = EditorScrollView()
         scroll.documentView = tv
@@ -49,6 +50,10 @@ struct MarkdownEditorView: NSViewRepresentable {
             tv.selectedRange = NSRange(location: (tv.string as NSString).length, length: 0)
         }
         return scroll
+    }
+
+    static func dismantleNSView(_ nsView: EditorScrollView, coordinator: Coordinator) {
+        coordinator.removeSpaceMonitor()
     }
 
     func updateNSView(_ nsView: EditorScrollView, context: Context) {
@@ -73,9 +78,43 @@ struct MarkdownEditorView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
         var isEditingLocally = false
+        private var spaceMonitor: Any?
+        private weak var textView: EditorTextView?
 
         init(_ parent: MarkdownEditorView) {
             self.parent = parent
+        }
+
+        deinit {
+            removeSpaceMonitor()
+        }
+
+        /// SwiftUI's ScrollView (an ancestor of this editor) loves to claim the
+        /// unmodified space key for page-scrolling before keyDown reaches the
+        /// text view — even performKeyEquivalent doesn't reliably win. A local
+        /// keyDown monitor runs before the responder chain, so when this text
+        /// view is the active first responder we insert the space ourselves and
+        /// swallow the event.
+        func installSpaceMonitor(for tv: EditorTextView) {
+            textView = tv
+            guard spaceMonitor == nil else { return }
+            spaceMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                guard let self, let tv = self.textView, event.window === tv.window else { return event }
+                guard tv.window?.firstResponder === tv,
+                      event.keyCode == 49,
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+                else { return event }
+                tv.insertText(" ", replacementRange: tv.selectedRange())
+                return nil
+            }
+        }
+
+        func removeSpaceMonitor() {
+            if let spaceMonitor {
+                NSEvent.removeMonitor(spaceMonitor)
+                self.spaceMonitor = nil
+            }
+            textView = nil
         }
 
         func textDidChange(_ notification: Notification) {

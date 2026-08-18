@@ -1,0 +1,136 @@
+name: Build
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: Build & Test (macOS)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project DayStream.xcodeproj \
+            -scheme DayStream \
+            -configuration Debug \
+            -destination platform=macOS \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            build 2>&1 | xcbeautify --quiet || xcodebuild \
+            -project DayStream.xcodeproj \
+            -scheme DayStream \
+            -configuration Debug \
+            -destination platform=macOS \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project DayStream.xcodeproj \
+            -scheme DayStream \
+            -configuration Debug \
+            -destination platform=macOS \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            test
+
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build/**/*.xcactivitylog
+          if-no-files-found: ignore
+
+  release:
+    name: Release app bundle
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build Release
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project DayStream.xcodeproj \
+            -scheme DayStream \
+            -configuration Release \
+            -destination generic/platform=macOS \
+            -derivedDataPath build \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES \
+            build
+
+      - name: Zip app bundle
+        run: |
+          cd build/Build/Products/Release
+          zip -qry DayStream-macOS.zip DayStream.app
+          shasum -a 256 DayStream-macOS.zip > DayStream-macOS.zip.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DayStream ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            build/Build/Products/Release/DayStream-macOS.zip
+            build/Build/Products/Release/DayStream-macOS.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docs:
+    name: GitHub Pages
+    if: github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: macos-15
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      - name: Build site
+        run: |
+          mkdir -p _site
+          cp docs/index.html _site/index.html
+          cp Resources/Assets.xcassets/AppIcon.appiconset/appicon.png _site/icon.png
+          cp README.md _site/readme.md
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

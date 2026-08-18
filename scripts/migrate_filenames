@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+#
+# migrate_filenames — move legacy journal filenames to the current
+# yyyy-MM-dd.md convention, backing up every original to backup/ first.
+#
+#   ./scripts/migrate_filenames <vault-root-or-journals-dir> [--apply]
+#
+# Without --apply it performs a dry run and prints what would happen.
+#
+# Conflict policy (target yyyy-MM-dd.md already exists):
+#   - identical content            -> legacy copy dropped
+#   - target empty, source has text -> empty target backed up + replaced
+#   - different content            -> skipped (a true conflict; both files stay)
+# `yyyy_MM_dd.md` files are processed before `dd-MM-yyyy.md` files so when a
+# date exists in both legacy formats the underscore note (the newer Logseq
+# convention) wins the ISO name, matching the app's preference order.
+set -euo pipefail
+
+DIR="${1:-}"
+APPLY="${2:-}"
+if [[ -z "$DIR" ]]; then
+  echo "usage: $0 <vault-root-or-journals-dir> [--apply]" >&2
+  exit 1
+fi
+
+if [[ -d "$DIR/journals" ]]; then
+  JOURNALS="$DIR/journals"
+  ROOT="$DIR"
+else
+  JOURNALS="$DIR"
+  ROOT="$(dirname "$DIR")"
+fi
+
+BACKUP="$ROOT/backup"
+DRY_RUN=1
+if [[ "$APPLY" == "--apply" ]]; then
+  DRY_RUN=0
+fi
+
+backup() {
+  mkdir -p "$BACKUP"
+  [[ -f "$BACKUP/$(basename "$1")" ]] || cp "$1" "$BACKUP/"
+}
+
+migrate_one() {
+  local f="$1" iso="$2"
+  local target="$JOURNALS/$iso.md"
+
+  if [[ ! -e "$target" ]]; then
+    echo "$(basename "$f") -> $iso.md"
+    if [[ $DRY_RUN -eq 0 ]]; then
+      backup "$f"
+      mv "$f" "$target"
+    fi
+    return
+  fi
+
+  if cmp -s "$f" "$target"; then
+    echo "DUPLICATE (will drop legacy copy): $(basename "$f") == $iso.md"
+    if [[ $DRY_RUN -eq 0 ]]; then
+      backup "$f"
+      rm "$f"
+    fi
+  elif [[ ! -s "$target" && -s "$f" ]]; then
+    echo "REPLACE EMPTY (back up + drop empty $iso.md, rename $(basename "$f"))"
+    if [[ $DRY_RUN -eq 0 ]]; then
+      backup "$f"
+      backup "$target"
+      rm "$target"
+      mv "$f" "$target"
+    fi
+  else
+    echo "CONFLICT (skipping, both kept): $(basename "$f") and $iso.md differ"
+  fi
+}
+
+shopt -s nullglob
+for f in "$JOURNALS"/[0-9][0-9][0-9][0-9]_[0-9][0-9]_[0-9][0-9].md; do
+  base="$(basename "$f" .md)"
+  migrate_one "$f" "${base//_/-}"
+done
+for f in "$JOURNALS"/[0-9][0-9]-[0-9][0-9]-[0-9][0-9][0-9][0-9].md; do
+  base="$(basename "$f" .md)"
+  migrate_one "$f" "${base:6:4}-${base:3:2}-${base:0:2}"
+done
+
+echo
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "Dry run complete. Re-run with --apply to migrate."
+else
+  echo "Done. Originals in $BACKUP."
+fi

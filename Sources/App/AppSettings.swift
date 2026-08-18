@@ -28,7 +28,7 @@ final class AppSettings {
 
     init() {
         let d = UserDefaults.standard
-        self.fontDesign = d.object(forKey: Keys.fontDesign) as? Int ?? 1
+        self.fontDesign = d.object(forKey: Keys.fontDesign) as? Int ?? 0
         self.fontSize = d.object(forKey: Keys.fontSize) as? Double ?? 15
         self.syncTodosAcrossNotes = d.object(forKey: Keys.syncTodos) as? Bool ?? true
     }
@@ -70,6 +70,27 @@ final class AppSettings {
         case .rounded: .system(size: fontSize + 0.5, weight: .semibold, design: .rounded)
         case .monospaced: .system(size: fontSize + 0.5, weight: .semibold, design: .monospaced)
         default: .system(size: fontSize + 0.5, weight: .semibold)
+        }
+    }
+
+    /// Day (date) headings in the stream — noticeably larger than body text.
+    var dayHeadingFont: Font {
+        switch fontDesignValue {
+        case .serif: .system(size: fontSize + 5, weight: .bold, design: .serif)
+        case .rounded: .system(size: fontSize + 5, weight: .bold, design: .rounded)
+        case .monospaced: .system(size: fontSize + 4, weight: .bold, design: .monospaced)
+        default: .system(size: fontSize + 5, weight: .bold)
+        }
+    }
+
+    /// Markdown heading (`#`, `##`, …) font, scaled down with depth.
+    func headingFont(level: Int) -> Font {
+        let bump = max(1.5, Double(5 - min(level, 4)))
+        switch fontDesignValue {
+        case .serif: return .system(size: fontSize + bump, weight: .semibold, design: .serif)
+        case .rounded: return .system(size: fontSize + bump, weight: .semibold, design: .rounded)
+        case .monospaced: return .system(size: fontSize + bump - 0.5, weight: .semibold, design: .monospaced)
+        default: return .system(size: fontSize + bump, weight: .semibold)
         }
     }
 }

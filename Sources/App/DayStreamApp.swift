@@ -6,13 +6,20 @@ struct DayStreamApp: App {
     @State private var settings = AppSettings.shared
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: "main") {
             RootView()
                 .environment(appModel)
                 .environment(settings)
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unified(showsTitle: true))
+
+        MenuBarExtra("DayStream", systemImage: "note.text") {
+            MenuBarPanel()
+                .environment(appModel)
+                .environment(settings)
+        }
+        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()

@@ -30,6 +30,7 @@
 		CC95C10DB08ADCB0CB7B4941 /* VaultFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */; };
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
+		EC24269376B29BF7DB79BC57 /* MenuBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -66,6 +67,7 @@
 		B84877F8F494AFFEAA6E3850 /* CarryForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForward.swift; sourceTree = "<group>"; };
 		C14A21F9F98D595DFF1FB767 /* DayStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D28CCBC0CF4AC629300BDC1B /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
 		E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStreamView.swift; sourceTree = "<group>"; };
 		FF59C399937042AEE4E3CC43 /* WikiName.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiName.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -144,6 +146,7 @@
 				6B67635F43462BF67C2E4426 /* AppModel.swift */,
 				0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */,
 				2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */,
+				DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */,
 				D28CCBC0CF4AC629300BDC1B /* SetupView.swift */,
 			);
 			path = App;
@@ -284,6 +287,7 @@
 				1436703D1FF1DE32722616F5 /* MainView.swift in Sources */,
 				C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */,
 				3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */,
+				EC24269376B29BF7DB79BC57 /* MenuBarPanel.swift in Sources */,
 				C1595A58F8C302348B31E8A5 /* PageView.swift in Sources */,
 				3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */,
 				B231746BDA28B33A89736FDE /* SetupView.swift in Sources */,
@@ -376,7 +380,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -485,7 +489,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.1.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

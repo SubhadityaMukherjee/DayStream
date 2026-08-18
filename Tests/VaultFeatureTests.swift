@@ -97,11 +97,25 @@ final class VaultFeatureTests: XCTestCase {
 
         store.toggleTodo(in: file, block: block, syncAcrossNotes: true)
 
-        let older = try String(contentsOf: journals.appendingPathComponent("2026-08-17.md"), encoding: .utf8)
-        XCTAssertEqual(older, "- DONE eval the model\n", "matching task in older note synced")
+        // Cross-note sync runs on a background queue; wait for the write.
+        let olderURL = journals.appendingPathComponent("2026-08-17.md")
+        let synced = waitForFile(olderURL, containing: "- DONE eval the model")
+        XCTAssertTrue(synced, "matching task in older note synced")
         let newer = try String(contentsOf: journals.appendingPathComponent("2026-08-18.md"), encoding: .utf8)
         XCTAssertTrue(newer.contains("- DONE eval the model"))
         XCTAssertTrue(newer.contains("- TODO keep me"))
+    }
+
+    /// Polls a file until it exists with the expected content (background sync).
+    private func waitForFile(_ url: URL, containing needle: String, timeout: TimeInterval = 3) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let text = try? String(contentsOf: url, encoding: .utf8), text.contains(needle) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        return (try? String(contentsOf: url, encoding: .utf8))?.contains(needle) ?? false
     }
 
     func testToggleTodoWithoutSyncLeavesOtherNotesAlone() throws {
@@ -175,5 +189,65 @@ final class VaultFeatureTests: XCTestCase {
         let url = store.pageURL(named: "Eval Notes", createIfMissing: true)
         XCTAssertNotNil(url)
         XCTAssertTrue(FileManager.default.fileExists(atPath: url!.path), "page file must exist on disk at creation")
+    }
+
+    // MARK: - Legacy filename migration
+
+    func testMigrateLegacyFilenamesRenamesAndBacksUp() throws {
+        try write("- old underscore note\n", name: "2026_08_10.md")
+        try write("- old dash note\n", name: "11-08-2026.md")
+        try write("- already iso\n", name: "2026-08-12.md")
+
+        let store = makeStore()
+        let result = store.migrateLegacyFilenames()
+
+        XCTAssertEqual(result.migrated, 2)
+        XCTAssertEqual(result.conflicts, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journals.appendingPathComponent("2026_08_10.md").path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journals.appendingPathComponent("11-08-2026.md").path))
+        XCTAssertEqual(try String(contentsOf: journals.appendingPathComponent("2026-08-10.md"), encoding: .utf8),
+                       "- old underscore note\n")
+        XCTAssertEqual(try String(contentsOf: journals.appendingPathComponent("2026-08-11.md"), encoding: .utf8),
+                       "- old dash note\n")
+
+        let backup = tmp.appendingPathComponent("backup")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.appendingPathComponent("2026_08_10.md").path),
+                      "originals backed up before rename")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backup.appendingPathComponent("11-08-2026.md").path))
+    }
+
+    func testMigrateReplacesEmptyPlaceholderWithLegacyContent() throws {
+        try write("- real content\n", name: "2026_08_10.md")
+        try "".write(to: journals.appendingPathComponent("2026-08-10.md"), atomically: true, encoding: .utf8)
+
+        let store = makeStore()
+        let result = store.migrateLegacyFilenames()
+
+        XCTAssertEqual(result.migrated, 1)
+        XCTAssertEqual(result.conflicts, 0)
+        XCTAssertEqual(try String(contentsOf: journals.appendingPathComponent("2026-08-10.md"), encoding: .utf8),
+                       "- real content\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journals.appendingPathComponent("2026_08_10.md").path))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: tmp.appendingPathComponent("backup/2026-08-10.md").path),
+            "empty placeholder backed up too")
+    }
+
+    func testMigrateSkipsConflictingDuplicatesButDropsIdenticalOnes() throws {
+        try write("- same content\n", name: "2026_08_10.md")
+        try write("- same content\n", name: "2026-08-10.md")
+        try write("- different content\n", name: "11-08-2026.md")
+        try write("- iso version\n", name: "2026-08-11.md")
+
+        let store = makeStore()
+        let result = store.migrateLegacyFilenames()
+
+        XCTAssertEqual(result.migrated, 1, "identical duplicate dropped")
+        XCTAssertEqual(result.conflicts, 1, "differing duplicate skipped")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journals.appendingPathComponent("2026_08_10.md").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journals.appendingPathComponent("11-08-2026.md").path),
+                      "conflicting legacy file untouched")
+        XCTAssertEqual(try String(contentsOf: journals.appendingPathComponent("2026-08-11.md"), encoding: .utf8),
+                       "- iso version\n")
     }
 }

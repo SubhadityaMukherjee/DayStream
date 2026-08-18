@@ -7,11 +7,17 @@ struct SettingsView: View {
     @Environment(AppSettings.self) private var settings
 
     @State private var cleanupSummary: VaultStore.CleanupResult?
+    @State private var migrationSummary: VaultStore.MigrationResult?
+    @State private var confirmMigrate = false
 
     var body: some View {
         TabView {
-            GeneralTab(cleanupSummary: $cleanupSummary)
-                .tabItem { Label("General", systemImage: "gearshape") }
+            GeneralTab(
+                cleanupSummary: $cleanupSummary,
+                confirmMigrate: $confirmMigrate,
+                migrationSummary: $migrationSummary
+            )
+            .tabItem { Label("General", systemImage: "gearshape") }
             FontTab()
                 .tabItem { Label("Fonts", systemImage: "textformat") }
         }
@@ -19,11 +25,39 @@ struct SettingsView: View {
         .sheet(item: $cleanupSummary) { result in
             CleanupAlert(result: result)
         }
+        .sheet(item: $migrationSummary) { result in
+            MigrationAlert(result: result)
+        }
     }
 }
 
 extension VaultStore.CleanupResult: Identifiable {
     public var id: String { "cleanup-\(deletedJournals)-\(deletedPages)" }
+}
+
+extension VaultStore.MigrationResult: Identifiable {
+    public var id: String { "migration-\(backedUp)-\(migrated)-\(conflicts)" }
+}
+
+private struct MigrationAlert: View {
+    let result: VaultStore.MigrationResult
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+                .font(.title)
+                .foregroundStyle(.secondary)
+            Text("Filename Migration")
+                .font(.headline)
+            Text(result.summary)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+            Button("OK") { dismiss() }
+                .keyboardShortcut(.defaultAction)
+        }
+        .padding(24)
+    }
 }
 
 private struct CleanupAlert: View {
@@ -50,6 +84,8 @@ private struct GeneralTab: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
     @Binding var cleanupSummary: VaultStore.CleanupResult?
+    @Binding var confirmMigrate: Bool
+    @Binding var migrationSummary: VaultStore.MigrationResult?
 
     var body: some View {
         @Bindable var settings = settings
@@ -68,10 +104,39 @@ private struct GeneralTab: View {
                 Text("Removes journal and page files that contain nothing but whitespace. Notes with content are never touched.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Button("Migrate legacy filenames…") {
+                    confirmMigrate = true
+                }
+                Text("Renames journal files like 2026_08_18.md or 18-08-2026.md to the 2026-08-18.md convention. Originals are copied to backup/ first.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text("Legacy formats in this vault: \(legacyCount)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 360)
+        .frame(width: 460, height: 430)
+        .confirmationDialog(
+            "Migrate legacy filenames?",
+            isPresented: $confirmMigrate,
+            titleVisibility: .visible
+        ) {
+            Button("Migrate") { migrationSummary = appModel.store?.migrateLegacyFilenames() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Every original is copied to backup/ before renaming. Files whose target name already exists with different content are skipped.")
+        }
+    }
+
+    private var legacyCount: Int {
+        guard let store = appModel.store else { return 0 }
+        return store.days.reduce(0) { count, day in
+            count + day.files.filter {
+                let stem = ($0.url.lastPathComponent as NSString).deletingPathExtension
+                return !(stem =~~ "^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+            }.count
+        }
     }
 
     private var vaultRow: some View {

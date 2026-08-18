@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DayStream — a daily-notes stream for your markdown vault</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    margin: 0; line-height: 1.6; color: #1d1d1f;
+    background: #fbfbfd;
+  }
+  .dark body, body:has(#dark-proxy) { }
+  @media (prefers-color-scheme: dark) {
+    body { color: #f5f5f7; background: #1c1c1e; }
+    a { color: #6cb2ff; }
+    .card { background: #2c2c2e !important; border-color: #3a3a3c !important; }
+    .hero-emoji { filter: none; }
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 0 24px 80px; }
+  .hero { text-align: center; padding: 72px 0 40px; }
+  .hero img { width: 128px; height: 128px; border-radius: 28px; box-shadow: 0 12px 40px rgba(0,0,0,.18); }
+  h1 { font-size: 40px; margin: 24px 0 8px; letter-spacing: -0.5px; }
+  .tagline { font-size: 19px; color: #6e6e73; margin: 0 0 28px; }
+  .badges a { text-decoration: none; margin: 0 4px; }
+  .cta { display: inline-block; background: #0071e3; color: #fff !important; padding: 12px 26px;
+         border-radius: 980px; font-weight: 600; text-decoration: none; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin: 40px 0; }
+  .card { background: #fff; border: 1px solid #e5e5ea; border-radius: 14px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 16px; }
+  .card p { margin: 0; font-size: 14px; color: #6e6e73; }
+  h2 { margin-top: 56px; font-size: 26px; letter-spacing: -0.3px; }
+  pre { background: #f2f2f7; border-radius: 10px; padding: 14px 16px; overflow-x: auto; font-size: 13px; }
+  @media (prefers-color-scheme: dark) { pre { background: #000; } }
+  code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  li { margin: 4px 0; }
+  a { color: #0066cc; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <img src="icon.png" alt="DayStream app icon" onerror="this.style.display='none'">
+    <h1>DayStream</h1>
+    <p class="tagline">A fast, native daily-notes stream for your existing markdown vault. Logseq-compatible, plain files, no lock-in.</p>
+    <p>
+      <a class="cta" href="https://github.com/SubhadityaMukherjee/daily_stream/releases">Download for macOS</a>
+    </p>
+    <p class="badges">
+      <a href="https://github.com/SubhadityaMukherjee/daily_stream/actions"><img src="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml/badge.svg" alt="Build"></a>
+      <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases"><img src="https://img.shields.io/github/v/release/SubhadityaMukherjee/daily_stream" alt="Release"></a>
+    </p>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>One endless stream</h3><p>All your daily notes in a single scroll, newest first. Click a calendar day to jump anywhere.</p></div>
+    <div class="card"><h3>Plain markdown</h3><p>Notes are ordinary <code>.md</code> files in <code>journals/</code>. Works alongside Logseq or any editor.</p></div>
+    <div class="card"><h3>Outliner tasks</h3><p>TODO / DOING / DONE markers, nested bullets, cross-note task syncing, and one-click carry-forward to today.</p></div>
+    <div class="card"><h3>[[Wikilinks]] &amp; pages</h3><p>Click a wikilink to open (or create) a page, with Logseq-style linked references.</p></div>
+    <div class="card"><h3>Menu bar quick add</h3><p>Capture a task for today from the menu bar without switching apps.</p></div>
+    <div class="card"><h3>Native &amp; fast</h3><p>SwiftUI + AppKit on macOS 15+. No Electron, no cloud account.</p></div>
+  </div>
+
+  <h2>Getting started</h2>
+  <ol>
+    <li>Download <code>DayStream-macOS.zip</code> from the <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases">releases page</a> and unzip it.</li>
+    <li>Move <strong>DayStream.app</strong> to <code>/Applications</code> (or <code>~/Applications</code>) and open it.</li>
+    <li>Pick your vault — the folder that contains a <code>journals/</code> directory (a Logseq vault root works as-is).</li>
+    <li>That's it. Today's note is created automatically; start typing.</li>
+  </ol>
+
+  <h2>Building from source</h2>
+  <pre><code>git clone https://github.com/SubhadityaMukherjee/daily_stream.git
+cd daily_stream
+./scripts/build_and_install release   # builds, installs to ~/Applications, launches</code></pre>
+  <p>Requires Xcode 16+ (macOS 15 SDK). <a href="https://github.com/SubhadityaMukherjee/daily_stream/blob/develop/README.md">Full details in the README.</a></p>
+
+  <h2>Branching &amp; releases</h2>
+  <ul>
+    <li><strong>develop</strong> — active development; CI builds and tests every push.</li>
+    <li><strong>main</strong> — stable; releases are tagged from it (<code>v1.0.0</code>, <code>v1.1.0</code>, …) and published as GitHub Releases.</li>
+  </ul>
+
+  <p style="margin-top:56px;color:#6e6e73;font-size:13px">DayStream is a personal project by Subhaditya Mukherjee.</p>
+</div>
+</body>
+</html>

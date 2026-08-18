@@ -1,0 +1,72 @@
+# DayStream
+
+A fast, native macOS app that turns a plain markdown vault (Logseq-compatible) into one endless, scrollable stream of daily notes. No cloud, no lock-in — just `.md` files on disk.
+
+Author: **Subhaditya Mukherjee**
+
+## What it does
+
+- **Daily-notes stream** — every dated note in `journals/`, newest first, with a month calendar sidebar for quick navigation.
+- **Outliner editing** — Enter continues bullets, Tab/Shift-Tab indent/outdent, `/todo `/`/doing `/`/later `/`/done ` slash commands, TODO-family markers with live syntax highlighting.
+- **Task syncing** — checking a task rewrites matching tasks in every other note (journals and pages alike).
+- **Carry forward** — one click copies all unfinished tasks from previous days into today's note, preserving structure.
+- **[[Wikilinks]] & pages** — click to open or create a page in `pages/`, with Logseq-style Linked References showing every mention across the vault.
+- **Menu bar applet** — quick-add a task to today and toggle today's open tasks without leaving what you're doing.
+- **Image & file drops** — dropped images are copied into `assets/` and embedded with relative markdown links.
+- **Live on disk** — external edits are picked up via file watching; the vault is safe to use from other tools at the same time.
+
+## Requirements
+
+- macOS 15+
+- Xcode 16+ (to build)
+
+## Building
+
+The project is generated with [XcodeGen](https://github.com/yonaskolb/XcodeGen) from `project.yml`:
+
+```sh
+./scripts/build_and_install            # Debug build → ~/Applications → launch
+./scripts/build_and_install release    # Release build
+./scripts/build_and_install test       # Build + run unit tests
+```
+
+The script installs XcodeGen via Homebrew on first run if needed.
+
+## Vault layout
+
+DayStream expects either:
+
+- a **vault root** containing `journals/` (a Logseq vault works as-is), or
+- the `journals/` directory itself.
+
+Recognized journal filename formats: `yyyy-MM-dd.md` (current convention, used for new files), `yyyy_MM_dd.md`, and `dd-MM-yyyy.md` (legacy). Legacy formats can be migrated in one click: **Settings → General → Maintenance → Migrate legacy filenames** — originals are copied to `backup/` first. There is also a standalone script:
+
+```sh
+./scripts/migrate_filenames /path/to/vault           # dry run
+./scripts/migrate_filenames /path/to/vault --apply   # backup + rename
+```
+
+## Documentation
+
+- GitHub Pages site: https://subhadityamukherjee.github.io/daily_stream/
+- This README renders on the repo home page.
+
+## Branching & releases
+
+- **develop** — active development. CI (GitHub Actions) builds and runs tests on every push/PR.
+- **main** — stable. Version tags (`v1.0.0`, …) live here; each tag builds a `DayStream-macOS.zip` and publishes a GitHub Release automatically.
+
+## Project structure
+
+```
+Sources/
+  App/        App entry point, app model, settings, menu bar panel, setup
+  Model/      Vault store, block tree parser, journal dates, carry-forward, wiki names
+  Views/      Stream, day sections, block rows, calendar, pages, settings
+  Editor/     AppKit-based markdown editor with outliner behaviors
+Tests/        XCTest suites for parsing, carry-forward, wiki names, vault behavior
+scripts/      build_and_install, migrate_filenames
+docs/         GitHub Pages site source
+```
+
+See `.agents/` and `AGENTS.md` for contributor/agent instructions.

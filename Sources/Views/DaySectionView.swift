@@ -56,7 +56,7 @@ struct DaySectionView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(Self.dateFormatter.string(from: day.date))
-                .font(settings.streamFontSemibold)
+                .font(settings.dayHeadingFont)
             Text(Self.weekdayFormatter.string(from: day.date))
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)

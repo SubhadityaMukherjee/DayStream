@@ -280,30 +280,39 @@ enum BlockTree {
 
     /// Rewrites every todo block whose normalized content matches `key` so its
     /// state becomes `state`. Returns nil when nothing needed changing.
+    /// Single parse pass + surgical in-place line edits, so it stays fast even
+    /// on large files (edits never change line counts, so line indices hold).
     static func syncedText(_ text: String, key: String, to state: TodoState) -> String? {
         guard !key.isEmpty else { return nil }
+        // Cheap prefilter: normalization only lowercases, collapses whitespace
+        // and trims edge punctuation, so every word of the key must appear
+        // (lowercased) verbatim in the raw text. Skip parsing when it doesn't.
+        guard let probe = key.components(separatedBy: " ").filter({ !$0.isEmpty })
+            .max(by: { $0.count < $1.count }) else { return nil }
+        guard text.lowercased().contains(probe) else { return nil }
+
+        var lineIndices: [Int] = []
+        func walk(_ nodes: [Block]) {
+            for b in nodes {
+                if b.todoState != .none, b.todoState != state, normalize(b.content) == key {
+                    lineIndices.append(b.lineIndex)
+                }
+                walk(b.children)
+            }
+        }
+        walk(parse(text))
+        guard !lineIndices.isEmpty else { return nil }
+
         var current = text
         var changed = false
-        for _ in 0..<500 {
-            guard let match = firstTodoBlock(in: parse(current), key: key, notIn: state) else { break }
-            let updated = toggledFileText(current, blockLineIndex: match.lineIndex)
-            guard updated != current else { break }
-            current = updated
-            changed = true
+        for idx in lineIndices {
+            let updated = toggledFileText(current, blockLineIndex: idx)
+            if updated != current {
+                current = updated
+                changed = true
+            }
         }
         return changed ? current : nil
-    }
-
-    private static func firstTodoBlock(in blocks: [Block], key: String, notIn state: TodoState) -> Block? {
-        for b in blocks {
-            if b.todoState != .none, b.todoState != state, normalize(b.content) == key {
-                return b
-            }
-            if let found = firstTodoBlock(in: b.children, key: key, notIn: state) {
-                return found
-            }
-        }
-        return nil
     }
 
     // MARK: - Carry-forward helpers

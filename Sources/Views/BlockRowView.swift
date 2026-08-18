@@ -7,16 +7,19 @@ struct BlockRowView: View {
     let file: VaultFile
     let store: VaultStore
 
+    private static let indentWidth: CGFloat = 18
+
     var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Spacer().frame(width: CGFloat(block.indent) * 18)
+        HStack(alignment: .top, spacing: 0) {
+            indentRails
 
             markerView
+                .frame(width: 20, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
                 if !block.isBullet, block.content.hasPrefix("#") {
                     MarkdownText(content: block.content)
-                        .font(settings.streamFontSemibold)
+                        .font(settings.headingFont(level: headingLevel))
                 } else {
                     MarkdownText(
                         content: block.content,
@@ -36,6 +39,29 @@ struct BlockRowView: View {
         ForEach(block.children) { child in
             BlockRowView(block: child, file: file, store: store)
         }
+    }
+
+    /// Outliner-style vertical guide rails, one per ancestor indent level.
+    /// Each row draws its own segment so stacked rows read as a continuous rail.
+    @ViewBuilder
+    private var indentRails: some View {
+        if block.indent > 0 {
+            HStack(alignment: .top, spacing: 0) {
+                ForEach(0..<block.indent, id: \.self) { _ in
+                    ZStack(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.secondary.opacity(0.22))
+                            .frame(width: 1)
+                            .padding(.vertical, -2)
+                    }
+                    .frame(width: Self.indentWidth)
+                }
+            }
+        }
+    }
+
+    private var headingLevel: Int {
+        block.content.prefix(while: { $0 == "#" }).count
     }
 
     @ViewBuilder
@@ -63,11 +89,18 @@ struct BlockRowView: View {
             .help("Mark as todo")
         case .none:
             if block.isBullet {
-                Text("•").foregroundStyle(.secondary)
+                Text(Self.bulletSymbol(level: block.indent))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             } else {
                 EmptyView()
             }
         }
+    }
+
+    /// Classic outliner bullets that cycle with depth: •, ◦, ▪.
+    private static func bulletSymbol(level: Int) -> String {
+        ["•", "◦", "▪"][level % 3]
     }
 
     @ViewBuilder

@@ -65,6 +65,8 @@ final class VaultStore {
     private var reloadWorkItem: DispatchWorkItem?
     /// Skip watcher reloads briefly after our own writes (they'd be redundant).
     private var lastSelfWrite: Date?
+    /// Serial queue for cross-note todo syncing, so checkbox clicks stay snappy.
+    private let syncQueue = DispatchQueue(label: "daystream.todocync", qos: .userInitiated)
     let watchEnabled: Bool
 
     init(vaultURL: URL, watchEnabled: Bool = true) {
@@ -191,7 +193,9 @@ final class VaultStore {
         let key = BlockTree.normalize(block.content)
         guard !key.isEmpty else { return }
         let target: TodoState = block.todoState == .done ? .open : .done
-        // Journals are in memory; pages are few and read on demand.
+        // Snapshot candidates on the main thread, then match/rewrite off-main so
+        // a click never stalls the UI on large vaults; results are applied back
+        // on the main thread.
         var others: [(url: URL, text: String)] = []
         for day in days {
             for f in day.files where f.url != file.url {
@@ -201,9 +205,19 @@ final class VaultStore {
         for url in pageFileURLs() {
             others.append((url, pageText(at: url)))
         }
-        for other in others {
-            if let synced = BlockTree.syncedText(other.text, key: key, to: target) {
-                write(text: synced, to: other.url)
+        syncQueue.async { [weak self] in
+            var updates: [(url: URL, text: String)] = []
+            for other in others {
+                if let synced = BlockTree.syncedText(other.text, key: key, to: target) {
+                    updates.append((other.url, synced))
+                }
+            }
+            guard !updates.isEmpty else { return }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                for update in updates {
+                    self.write(text: update.text, to: update.url)
+                }
             }
         }
     }
@@ -318,6 +332,101 @@ final class VaultStore {
         var deletedJournals = 0
         var deletedPages = 0
         var freedBytes: Int64 = 0
+    }
+
+    struct MigrationResult: Equatable {
+        var backedUp = 0
+        var migrated = 0
+        var conflicts = 0
+
+        var summary: String {
+            var s = "Backed up \(backedUp) note\(backedUp == 1 ? "" : "s") to backup/, renamed \(migrated) to yyyy-MM-dd.md."
+            if conflicts > 0 {
+                s += " \(conflicts) skipped (a different note with the target name already exists)."
+            }
+            return s
+        }
+    }
+
+    /// Renames legacy-format journal files (`yyyy_MM_dd.md`, `dd-MM-yyyy.md`)
+    /// to the current `yyyy-MM-dd.md` convention. Every original is copied into
+    /// `backup/` (in the vault root) before anything is touched; a rename is
+    /// skipped when the target already exists with different content.
+    @discardableResult
+    func migrateLegacyFilenames() -> MigrationResult {
+        let fm = FileManager.default
+        var result = MigrationResult()
+        let backupURL = backupDirectory()
+
+        for day in days {
+            for file in day.files {
+                let name = file.url.lastPathComponent
+                let stem = (name as NSString).deletingPathExtension
+                // Already ISO? (Compare by format, not date: `file.date` is the
+                // local start-of-day grouping key, which doesn't round-trip
+                // through the UTC filename formatter in every timezone.)
+                if stem =~~ "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" { continue }
+                guard let nameDate = JournalDate.date(fromFilename: name) else { continue }
+                let targetName = JournalDate.filename(for: nameDate)
+
+                // Safety copy first.
+                let backupCopy = backupURL.appendingPathComponent(name)
+                if !fm.fileExists(atPath: backupCopy.path) {
+                    if (try? fm.copyItem(at: file.url, to: backupCopy)) != nil {
+                        result.backedUp += 1
+                    }
+                }
+
+                let target = journalsURL.appendingPathComponent(targetName)
+                if fm.fileExists(atPath: target.path) {
+                    let existing = (try? String(contentsOf: target, encoding: .utf8)) ?? ""
+                    if existing == file.text {
+                        // Identical duplicate: drop the legacy copy.
+                        try? fm.removeItem(at: file.url)
+                        result.migrated += 1
+                    } else if existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                              !file.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        // Empty duplicate (e.g. an app-created placeholder) shadowing
+                        // real content in the legacy file: replace it.
+                        let targetBackup = backupURL.appendingPathComponent(target.lastPathComponent)
+                        if !fm.fileExists(atPath: targetBackup.path) {
+                            try? fm.copyItem(at: target, to: targetBackup)
+                        }
+                        try? fm.removeItem(at: target)
+                        if (try? fm.moveItem(at: file.url, to: target)) != nil {
+                            result.migrated += 1
+                        } else {
+                            result.conflicts += 1
+                        }
+                    } else {
+                        result.conflicts += 1
+                    }
+                    continue
+                }
+                do {
+                    try fm.moveItem(at: file.url, to: target)
+                    result.migrated += 1
+                } catch {
+                    result.conflicts += 1
+                }
+            }
+        }
+        if result.migrated > 0 {
+            reload()
+        }
+        return result
+    }
+
+    /// Vault-level backup directory (`<vault root>/backup`), created on demand.
+    func backupDirectory() -> URL {
+        let root: URL
+        switch layout {
+        case .root: root = vaultURL
+        case .journalsDirectory: root = vaultURL.deletingLastPathComponent()
+        }
+        let url = root.appendingPathComponent("backup", isDirectory: true)
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
     }
 
     /// Deletes journal and page files that contain nothing but whitespace.
