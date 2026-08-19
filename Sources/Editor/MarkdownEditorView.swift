@@ -12,10 +12,20 @@ import AppKit
 /// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
 /// - Live highlighting of markers, `[[wikilinks]]`, code spans, headings
+///
+/// Data flow: the text view owns the text while editing. `text` is read only
+/// at creation, and external corrections arrive via `pushedText` — keystrokes
+/// never round-trip through SwiftUI state. (A `Binding` here re-rendered the
+/// hosting section on every keystroke, which churned the glass layout and
+/// made typing laggy with a visually jumpy caret.)
 struct MarkdownEditorView: NSViewRepresentable {
-    @Binding var text: String
-    /// nil = resolve from settings at view-update time. A concrete default
-    /// here would run AppSettings lookups on every struct re-creation.
+    /// Text the editor starts with (captured when the view is created).
+    var text: String
+    /// External text to push into the editor (watcher adoption, add-todo).
+    /// nil = leave the editor alone; repeats of the last applied value are
+    /// ignored, and equal-to-current text is a no-op.
+    var pushedText: String? = nil
+    /// nil = resolve from settings at view-update time, cached by signature.
     var font: NSFont? = nil
     /// Importer for dropped images; nil disables image importing.
     var imageImporter: ((Data, String?) -> String?)? = nil
@@ -48,6 +58,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
         tv.highlight()
+        context.coordinator.appliedFontSignature = Self.fontSignature(tv.font)
         context.coordinator.installSpaceMonitor(for: tv)
 
         let scroll = EditorScrollView()
@@ -78,47 +89,52 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func updateNSView(_ nsView: EditorScrollView, context: Context) {
         guard let tv = nsView.editor else { return }
-        let resolvedFont = font ?? AppSettings.shared.editorFont()
-        if tv.string != text, !context.coordinator.isEditingLocally {
-            // External change (watcher, carry-forward, add-task). Replacing
-            // the whole string moves the caret to the end — restore it
-            // (clamped) so the cursor never jumps while reading or typing.
-            let sel = tv.selectedRange
-            tv.string = text
-            tv.highlight()
-            tv.selectedRange = NSRange(location: min(sel.location, (text as NSString).length), length: 0)
-        }
-        if context.coordinator.lastCaretAtEndRequest != caretAtEndRequest {
-            context.coordinator.lastCaretAtEndRequest = caretAtEndRequest
-            let end = NSRange(location: (text as NSString).length, length: 0)
-            tv.selectedRange = end
-            tv.scrollRangeToVisible(end)
-        }
-        if tv.font != resolvedFont {
-            tv.font = resolvedFont
-            tv.highlight()
-        }
-        nsView.invalidateIntrinsicContentSize()
+        tv.onTextChanged = onTextChanged
         tv.onCommit = onCommit
         tv.onSaveCommit = onSaveCommit
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
+
+        if let pushed = pushedText, pushed != context.coordinator.appliedPushedText {
+            context.coordinator.appliedPushedText = pushed
+            if tv.string != pushed {
+                tv.applyExternalText(pushed)
+            }
+        }
+        if context.coordinator.lastCaretAtEndRequest != caretAtEndRequest {
+            context.coordinator.lastCaretAtEndRequest = caretAtEndRequest
+            let end = NSRange(location: (tv.string as NSString).length, length: 0)
+            tv.selectedRange = end
+            tv.scrollRangeToVisible(end)
+        }
+        let resolvedFont = font ?? AppSettings.shared.editorFont()
+        // NSFont instances created from descriptors don't reliably compare
+        // equal, so cache by signature — re-applying the font (plus a full
+        // re-highlight) on every update made typing heavy.
+        let signature = Self.fontSignature(resolvedFont)
+        if signature != context.coordinator.appliedFontSignature {
+            context.coordinator.appliedFontSignature = signature
+            tv.font = resolvedFont
+            tv.highlight()
+            nsView.invalidateIntrinsicContentSize()
+        }
+    }
+
+    private static func fontSignature(_ font: NSFont?) -> String {
+        guard let font else { return "" }
+        return "\(font.fontName)|\(font.pointSize)"
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(self)
+        Coordinator()
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
-        var parent: MarkdownEditorView
-        var isEditingLocally = false
+        var appliedPushedText: String?
         var lastCaretAtEndRequest = 0
+        var appliedFontSignature: String?
         private var spaceMonitor: Any?
         private weak var textView: EditorTextView?
-
-        init(_ parent: MarkdownEditorView) {
-            self.parent = parent
-        }
 
         deinit {
             removeSpaceMonitor()
@@ -153,13 +169,30 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let tv = notification.object as? NSTextView else { return }
-            isEditingLocally = true
-            parent.text = tv.string
-            parent.onTextChanged?(tv.string)
-            isEditingLocally = false
-            (tv as? EditorTextView)?.updateSuggestions()
+            guard let tv = notification.object as? EditorTextView else { return }
+            tv.handleTextChanged()
+            tv.onTextChanged?(tv.string)
         }
+    }
+}
+
+/// Editor state that changes on every keystroke, deliberately held *outside*
+/// SwiftUI's invalidation graph (a class instance inside `@State`): writing
+/// `text`/`isDirty` @State per keystroke re-rendered the hosting section and
+/// its glass chrome on every key press. Callers keep the session as the
+/// source of truth for saves and edit/commit flows.
+final class EditorSession {
+    var text = ""
+    /// File text as of the last sync (start of editing, our own save, or an
+    /// external update). Used to detect external changes while editing.
+    var base = ""
+    var saveTask: Task<Void, Never>?
+
+    var isClean: Bool { text == base }
+
+    func cancelSave() {
+        saveTask?.cancel()
+        saveTask = nil
     }
 }
 
@@ -179,11 +212,69 @@ final class EditorScrollView: NSScrollView {
 }
 
 final class EditorTextView: NSTextView {
+    var onTextChanged: ((String) -> Void)?
     var onCommit: (() -> Void)?
     var onSaveCommit: (() -> Void)?
     var imageImporter: ((Data, String?) -> String?)? = nil
     var pageNamesProvider: (() -> [String])? = nil
     private var suggest: WikiSuggestController?
+    /// Edit recorded in shouldChangeText (UTF-16 range after the edit) and
+    /// consumed by the next handleTextChanged for line-local highlighting.
+    private var pendingEditRange: NSRange?
+    /// External replacement deferred while an input method has marked text.
+    private var pendingExternalText: String?
+    /// Idle-timer that reconciles cross-line effects (fences) after typing.
+    private var highlightReconcileTask: Task<Void, Never>?
+
+    deinit {
+        highlightReconcileTask?.cancel()
+    }
+
+    // MARK: - Text change plumbing
+
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
+        let ok = super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
+        if ok {
+            let replacementLength = (replacementString as NSString?)?.length ?? 0
+            pendingEditRange = NSRange(location: affectedCharRange.location, length: replacementLength)
+        }
+        return ok
+    }
+
+    /// Runs on every text change: deferred external replacements, live
+    /// highlighting of the edited line, wikilink suggestions, and the
+    /// content-fitting size refresh. Stays entirely inside the text view so
+    /// a keystroke never triggers SwiftUI work.
+    func handleTextChanged() {
+        applyPendingExternalText()
+        highlightPendingEdit()
+        updateSuggestions()
+        (enclosingScrollView as? EditorScrollView)?.invalidateIntrinsicContentSize()
+    }
+
+    /// Replaces the whole text with an externally produced version, keeping
+    /// the caret (clamped) so reading and typing positions survive. During
+    /// an input-method session the swap is deferred — replacing under marked
+    /// text corrupts the composition.
+    func applyExternalText(_ newText: String) {
+        guard !hasMarkedText() else {
+            pendingExternalText = newText
+            return
+        }
+        pendingEditRange = nil
+        let sel = selectedRange()
+        string = newText
+        highlight()
+        selectedRange = NSRange(location: min(sel.location, (newText as NSString).length), length: 0)
+        scrollRangeToVisible(selectedRange)
+        (enclosingScrollView as? EditorScrollView)?.invalidateIntrinsicContentSize()
+    }
+
+    private func applyPendingExternalText() {
+        guard let pending = pendingExternalText, !hasMarkedText() else { return }
+        pendingExternalText = nil
+        applyExternalText(pending)
+    }
 
     private var slashMarkers: [String: String] {
         ["/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE"]
@@ -658,105 +749,157 @@ final class EditorTextView: NSTextView {
         ]
     }
 
+    /// Patterns are line-local (`\n` excluded), so per-line application is
+    /// equivalent to a whole-document pass — and lets typing highlight just
+    /// the edited line.
+    private static let wikilinkRegex = try! NSRegularExpression(pattern: #"\[\[[^\[\]\n]+\]\]"#)
+    private static let codeSpanRegex = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
+    private static let boldRegex = try! NSRegularExpression(pattern: #"\*\*[^*\n]+\*\*"#)
+
     func highlight() {
         guard let storage = textStorage else { return }
         let full = NSRange(location: 0, length: storage.length)
         let baseFont = font ?? .systemFont(ofSize: 14)
-        let baseColor = NSColor.labelColor
 
         storage.beginEditing()
         storage.setAttributes([
             .font: baseFont,
-            .foregroundColor: baseColor,
+            .foregroundColor: NSColor.labelColor,
         ], range: full)
 
-        let text = storage.string
-        let lines = text.components(separatedBy: "\n")
-        let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
-        var fenceRanges: [NSRange] = []
+        let s = storage.string as NSString
         var inFence = false
-        var lineStart = 0
-        for line in lines {
-            // UTF-16 offsets: emoji make a line's scalar count diverge from
-            // its storage length, which would shift every later attribute.
-            let lineLen = (line as NSString).length
-            defer { lineStart += lineLen + 1 }
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { continue }
-            let indentLen = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
-
-            // Fenced code blocks: monospaced, kept verbatim (no marker,
-            // wikilink or emphasis styling inside), tracked so the regex
-            // pass below can skip their ranges.
-            if BlockTree.fenceMarker(trimmed) != nil {
+        s.enumerateSubstrings(in: full, options: .byLines) { substring, lineRange, _, _ in
+            let fenceBeforeLine = inFence
+            if let substring, BlockTree.fenceMarker(substring.trimmingCharacters(in: .whitespaces)) != nil {
                 inFence.toggle()
-                storage.addAttributes([
-                    .font: mono,
-                    .foregroundColor: NSColor.systemBrown,
-                ], range: NSRange(location: lineStart, length: lineLen))
-                fenceRanges.append(NSRange(location: lineStart, length: lineLen))
-                continue
             }
-            if inFence {
-                storage.addAttributes([
-                    .font: mono,
-                    .foregroundColor: NSColor.labelColor,
-                ], range: NSRange(location: lineStart, length: lineLen))
-                fenceRanges.append(NSRange(location: lineStart, length: lineLen))
-                continue
-            }
+            self.styleLine(lineRange, in: s, storage: storage, baseFont: baseFont, inFence: fenceBeforeLine)
+        }
+        storage.endEditing()
+    }
 
-            // Headings.
-            if trimmed.hasPrefix("#") {
-                let r = NSRange(location: lineStart, length: lineLen)
-                storage.addAttributes([
-                    .font: NSFont.systemFont(ofSize: baseFont.pointSize + 1.5, weight: .semibold),
-                ], range: r)
-                continue
-            }
+    /// Highlights only the lines touched by the last edit. Fenced-code state
+    /// is derived by scanning the preceding lines (cheap prefix checks), so
+    /// the edited line renders exactly as a full pass would paint it.
+    private func highlightPendingEdit() {
+        guard let storage = textStorage else { return }
+        defer { pendingEditRange = nil }
+        guard let edited = pendingEditRange else { return }
+        let s = storage.string as NSString
+        guard edited.location <= s.length else { return }
+        let clamped = NSRange(location: edited.location,
+                              length: min(edited.length, s.length - edited.location))
+        let lineRange = s.lineRange(for: clamped)
+        let baseFont = font ?? .systemFont(ofSize: 14)
+        let inFence = fenceOpen(before: lineRange.location, in: s)
+        storage.beginEditing()
+        styleLine(lineRange, in: s, storage: storage, baseFont: baseFont, inFence: inFence)
+        storage.endEditing()
+        scheduleHighlightReconcile()
+    }
 
-            // TODO-family markers on bullet lines.
-            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
-                let afterBullet = trimmed.dropFirst(2)
-                for (marker, color) in markerColors {
-                    if afterBullet.hasPrefix(marker + " ") || afterBullet == marker {
-                        let markerOffset = indentLen + 2
-                        let r = NSRange(location: lineStart + markerOffset, length: marker.count)
+    /// Fence edits change the styling of *following* lines, which the
+    /// line-local pass can't know about. A short idle pass over the whole
+    /// document reconciles those (and is cheap: no regex compilation).
+    private func scheduleHighlightReconcile() {
+        highlightReconcileTask?.cancel()
+        highlightReconcileTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled else { return }
+            await MainActor.run { self?.highlight() }
+        }
+    }
+
+    /// Whether a fenced code block is open at `index` (start of a line).
+    private func fenceOpen(before index: Int, in s: NSString) -> Bool {
+        guard index > 0 else { return false }
+        var open = false
+        s.enumerateSubstrings(in: NSRange(location: 0, length: index), options: .byLines) { substring, _, _, _ in
+            if let substring, BlockTree.fenceMarker(substring.trimmingCharacters(in: .whitespaces)) != nil {
+                open.toggle()
+            }
+        }
+        return open
+    }
+
+    /// Styles one line (range excludes the newline). Resets base attributes
+    /// first so removed markers don't keep stale styling.
+    private func styleLine(_ lineRange: NSRange, in s: NSString, storage: NSTextStorage, baseFont: NSFont, inFence: Bool) {
+        let baseAttrs: [NSAttributedString.Key: Any] = [
+            .font: baseFont,
+            .foregroundColor: NSColor.labelColor,
+        ]
+        storage.setAttributes(baseAttrs, range: lineRange)
+        guard lineRange.length > 0 else { return }
+        let line = s.substring(with: lineRange)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
+
+        // Fenced code blocks: monospaced, kept verbatim (no marker, wikilink
+        // or emphasis styling inside).
+        if BlockTree.fenceMarker(trimmed) != nil {
+            storage.addAttributes([
+                .font: mono,
+                .foregroundColor: NSColor.systemBrown,
+            ], range: lineRange)
+            return
+        }
+        if inFence {
+            storage.addAttributes([
+                .font: mono,
+                .foregroundColor: NSColor.labelColor,
+            ], range: lineRange)
+            return
+        }
+
+        // Headings.
+        if trimmed.hasPrefix("#") {
+            storage.addAttributes([
+                .font: NSFont.systemFont(ofSize: baseFont.pointSize + 1.5, weight: .semibold),
+            ], range: lineRange)
+            return
+        }
+
+        // TODO-family markers on bullet lines.
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
+            let afterBullet = trimmed.dropFirst(2)
+            for (marker, color) in markerColors {
+                if afterBullet.hasPrefix(marker + " ") || afterBullet == marker {
+                    // Indent is tabs/spaces only, so scalar and UTF-16 counts
+                    // agree here.
+                    let indentLen = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
+                    let markerOffset = indentLen + 2
+                    let r = NSRange(location: lineRange.location + markerOffset, length: marker.count)
+                    if r.location >= lineRange.location,
+                       NSMaxRange(r) <= NSMaxRange(lineRange) {
                         storage.addAttributes([
                             .foregroundColor: color,
                             .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold),
                         ], range: r)
-                        break
                     }
+                    break
                 }
             }
         }
 
-        // Wikilinks, code spans, emphasis — regex over the whole text, never
-        // inside fenced code blocks.
-        let nsText = text as NSString
-        func paint(pattern: String, attributes: [NSAttributedString.Key: Any]) {
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
-            regex.enumerateMatches(in: text, range: full) { match, _, _ in
-                guard let match,
-                      !fenceRanges.contains(where: {
-                          NSIntersectionRange($0, match.range).length > 0
-                      })
-                else { return }
-                storage.addAttributes(attributes, range: match.range)
+        // Wikilinks, code spans, emphasis — line-local by pattern.
+        func paint(_ regex: NSRegularExpression, _ attributes: [NSAttributedString.Key: Any]) {
+            regex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
+                if let match {
+                    storage.addAttributes(attributes, range: match.range)
+                }
             }
         }
-        paint(pattern: #"\[\[[^\[\]\n]+\]\]"#, attributes: [
-            .foregroundColor: NSColor.readableLink,
-        ])
-        paint(pattern: #"`[^`\n]+`"#, attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular),
+        paint(Self.wikilinkRegex, [.foregroundColor: NSColor.readableLink])
+        paint(Self.codeSpanRegex, [
+            .font: mono,
             .foregroundColor: NSColor.systemBrown,
         ])
-        paint(pattern: #"\*\*[^*\n]+\*\*"#, attributes: [
+        paint(Self.boldRegex, [
             .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .bold),
         ])
-        storage.endEditing()
     }
 }
 

@@ -14,6 +14,11 @@ struct PageView: View {
     @State private var pageURL: URL?
     @State private var isDirty = false
     @State private var isEditing = false
+    /// Live editor text and the debounced save task. Kept outside @State
+    /// invalidation (a class in @State): per-keystroke writes here must not
+    /// re-render the sheet on every key press. `text` stays synced at edit
+    /// boundaries and is what the rendered view reads.
+    @State private var session = EditorSession()
     @State private var mentions: [VaultStore.Mention] = []
     @State private var confirmDelete = false
 
@@ -26,11 +31,14 @@ struct PageView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     if isEditing {
                         MarkdownEditorView(
-                            text: $text,
+                            text: session.text,
                             imageImporter: imageImporter,
                             pageNamesProvider: { [weak appModel] in appModel?.store?.allPageNames() ?? [] },
-                            onTextChanged: { _ in
-                                isDirty = true
+                            onTextChanged: { newText in
+                                session.text = newText
+                                if !isDirty {
+                                    isDirty = true
+                                }
                                 scheduleSave()
                             },
                             onCommit: {
@@ -64,6 +72,7 @@ struct PageView: View {
                 let url = store.pageURL(named: pageName, createIfMissing: true)
                 pageURL = url
                 text = url.map { store.pageText(at: $0) } ?? ""
+                session.text = text
                 refreshMentions()
             }
         }
@@ -163,6 +172,7 @@ struct PageView: View {
         let file = VaultFile(url: url, date: Date(), text: text)
         store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
         text = store.pageText(at: url)
+        session.text = text
         isDirty = false
         refreshMentions()
     }
@@ -171,18 +181,21 @@ struct PageView: View {
 
     private func startEditing() {
         save()
+        session.text = text
         isEditing = true
     }
 
     private func exitEditing() {
         // Quitting the editor auto-formats, same as ⌘S.
-        text = NoteFormatter.normalizedForSave(text, isToday: false, now: Date())
+        let normalized = NoteFormatter.normalizedForSave(session.text, isToday: false, now: Date())
+        session.text = normalized
+        text = normalized
         save()
         isEditing = false
     }
 
     private func saveAndQuit() {
-        saveTask?.cancel()
+        session.cancelSave()
         exitEditing()
     }
 
@@ -260,11 +273,9 @@ struct PageView: View {
 
     // MARK: - Saving / deletion
 
-    @State private var saveTask: Task<Void, Never>?
-
     private func scheduleSave() {
-        saveTask?.cancel()
-        saveTask = Task {
+        session.cancelSave()
+        session.saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             await MainActor.run { save() }
@@ -276,8 +287,8 @@ struct PageView: View {
         let url = pageURL ?? store.pageURL(named: pageName, createIfMissing: true)
         guard let url else { return }
         let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if current != text {
-            store.write(text: text, to: url)
+        if current != session.text {
+            store.write(text: session.text, to: url)
             isDirty = false
             refreshMentions()
         }
@@ -285,7 +296,7 @@ struct PageView: View {
 
     private func deleteEmptyPage() {
         guard let store = appModel.store, let url = pageURL else { return }
-        saveTask?.cancel()
+        session.cancelSave()
         try? FileManager.default.removeItem(at: url)
         store.reload()
         dismiss()

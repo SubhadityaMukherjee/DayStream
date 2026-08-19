@@ -65,6 +65,13 @@ final class VaultStore {
     private var reloadWorkItem: DispatchWorkItem?
     /// Skip watcher reloads briefly after our own writes (they'd be redundant).
     private var lastSelfWrite: Date?
+    /// Bumped by every write. Snapshots and async applies capture the value
+    /// they started from and are discarded when it moved, so a stale
+    /// snapshot can never roll `days` (or the file) back mid-editing.
+    private var writeGeneration = 0
+    /// Serializes file writes so an async typing save can never land on disk
+    /// after a newer synchronous write to the same file.
+    private let writeQueue = DispatchQueue(label: "daystream.write", qos: .userInitiated)
     /// Serial queue for cross-note todo syncing, so checkbox clicks stay snappy.
     private let syncQueue = DispatchQueue(label: "daystream.todocync", qos: .userInitiated)
     /// Vault parsing for watcher-triggered reloads runs here, off the main thread.
@@ -151,16 +158,16 @@ final class VaultStore {
     /// I/O and parsing on a background queue, so external edits to a large
     /// vault can never stall the main thread. Results land on the main thread.
     private func reloadAsync() {
+        let generation = writeGeneration
         reloadQueue.async { [weak self] in
             guard let self else { return }
             let snap = self.computeSnapshot()
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                // Skip a stale snapshot racing one of our own writes — those
-                // already refreshed the store in place with newer content.
-                if let last = self.lastSelfWrite, Date().timeIntervalSince(last) < 0.8 {
-                    return
-                }
+                // Discard a snapshot that raced one of our own writes — those
+                // already refreshed the store with newer content, and
+                // applying the snapshot would revert it under the editor.
+                guard self.writeGeneration == generation else { return }
                 self.applySnapshot(days: snap.days, pageCount: snap.pageCount)
                 self.onExternalChange?()
             }
@@ -204,20 +211,46 @@ final class VaultStore {
     // MARK: - Writing
 
     func write(text: String, to url: URL) {
+        writeGeneration += 1
         lastSelfWrite = Date()
+        // Drain in-flight async typing saves first so this newer write can
+        // never be overtaken on disk by an older queued one.
+        writeQueue.sync {}
         try? text.write(to: url, atomically: true, encoding: .utf8)
         refresh(fileURL: url, newText: text)
+    }
+
+    /// Debounced typing saves: file I/O and block parsing off the main
+    /// thread; the parsed file is applied to `days` on the main thread in
+    /// write order, and only if no newer write superseded it.
+    func writeAsync(text: String, to url: URL) {
+        writeGeneration += 1
+        let generation = writeGeneration
+        lastSelfWrite = Date()
+        writeQueue.async { [weak self] in
+            try? text.write(to: url, atomically: true, encoding: .utf8)
+            let day = JournalDate.startOfDay(url.dateFromJournalName ?? Date())
+            let file = VaultFile(url: url, date: day, text: text)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.writeGeneration == generation else { return }
+                self.applyRefresh(file)
+            }
+        }
     }
 
     /// Re-parse a single file in place (keeps scroll position; avoids full reload).
     func refresh(fileURL: URL, newText: String) {
         let day = JournalDate.startOfDay(fileURL.dateFromJournalName ?? Date())
-        guard let dayIndex = days.firstIndex(where: { $0.date == day }) else {
+        applyRefresh(VaultFile(url: fileURL, date: day, text: newText))
+    }
+
+    private func applyRefresh(_ file: VaultFile) {
+        guard let dayIndex = days.firstIndex(where: { $0.date == file.date }) else {
             reload()
             return
         }
-        if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == fileURL }) {
-            days[dayIndex].files[fileIndex] = VaultFile(url: fileURL, date: day, text: newText)
+        if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == file.url }) {
+            days[dayIndex].files[fileIndex] = file
         } else {
             reload()
         }

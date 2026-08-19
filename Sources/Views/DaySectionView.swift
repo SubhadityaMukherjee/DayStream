@@ -1,7 +1,10 @@
 import SwiftUI
 
 /// One day in the stream: sticky header + rendered blocks, or the raw
-/// markdown editor when editing. Saves are debounced.
+/// markdown editor when editing. Saves are debounced. Text typed into the
+/// editor lives in `session` (a class held by @State) — per-keystroke writes
+/// must never touch @State here, or the whole section (glass chrome
+/// included) re-renders on every key press.
 struct DaySectionView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
@@ -9,14 +12,13 @@ struct DaySectionView: View {
     let store: VaultStore
 
     @State private var isEditing = false
-    @State private var draft = ""
-    /// File text as of the last sync (start of editing, our own save, or an
-    /// external update). Used to detect external changes while editing.
-    @State private var base = ""
-    @State private var saveTask: Task<Void, Never>?
+    @State private var session = EditorSession()
     @State private var confirmDelete = false
     /// Incremented by addTodo; lands the caret after the appended "- TODO ".
     @State private var caretAtEndRequest = 0
+    /// External text to push into the open editor (watcher adoption while
+    /// the draft is clean, add-todo append while already editing).
+    @State private var pushedText: String?
     /// Last appModel.newTodoRequest this cell consumed (only today's cell
     /// reacts; cells are recycled so both onChange and onAppear check).
     @State private var handledNewTodoRequest = 0
@@ -54,21 +56,23 @@ struct DaySectionView: View {
             // The stream's List recycles rows: if this cell is handed a
             // different day, drop any leftover edit state from the old one
             // (pending saves were already flushed by onDisappear).
-            saveTask?.cancel()
-            saveTask = nil
+            session.cancelSave()
+            session.text = ""
+            session.base = ""
+            pushedText = nil
             isEditing = false
-            draft = ""
-            base = ""
         }
         .onChange(of: editFile?.text) { _, newText in
             // External change (carry-forward, another editor, file watcher):
             // adopt it if the user hasn't typed since the last sync, so a
-            // stale draft can never overwrite the file on close.
+            // stale draft can never overwrite the file on close. Pushing
+            // into the editor re-renders this section once (not per keystroke).
             guard isEditing, let newText else { return }
-            if draft == base {
-                draft = newText
+            if session.isClean, newText != session.text {
+                session.text = newText
+                pushedText = newText
             }
-            base = newText
+            session.base = newText
         }
         .onChange(of: appModel.newTodoRequest) { _, _ in
             handleNewTodoRequestIfToday()
@@ -166,11 +170,12 @@ struct DaySectionView: View {
     private func addTodo() {
         flushSave()
         let ensured = store.ensureDayFile(for: day.date)
-        let baseText = isEditing ? draft : ensured.text
+        let baseText = isEditing ? session.text : ensured.text
         let separator = baseText.isEmpty || baseText.hasSuffix("\n") ? "" : "\n"
         let newText = baseText + separator + "- TODO "
-        draft = newText
-        base = newText
+        session.text = newText
+        session.base = newText
+        pushedText = newText
         caretAtEndRequest += 1
         if !isEditing {
             isEditing = true
@@ -194,10 +199,12 @@ struct DaySectionView: View {
     private var content: some View {
         if isEditing {
             MarkdownEditorView(
-                text: $draft,
+                text: session.text,
+                pushedText: pushedText,
                 imageImporter: imageImporter,
                 pageNamesProvider: { [weak store] in store?.allPageNames() ?? [] },
                 onTextChanged: { newText in
+                    session.text = newText
                     scheduleSave(newText)
                 },
                 onCommit: {
@@ -258,8 +265,9 @@ struct DaySectionView: View {
     private func startEditing() {
         flushSave()
         guard let file = editFile else { return }
-        draft = file.text
-        base = file.text
+        session.text = file.text
+        session.base = file.text
+        pushedText = nil
         isEditing = true
         appModel.editingDay = day.date
     }
@@ -270,7 +278,7 @@ struct DaySectionView: View {
     }
 
     private func endEditing() {
-        saveTask?.cancel()
+        session.cancelSave()
         guard isEditing else { return }
         isEditing = false
         if appModel.editingDay == day.date {
@@ -278,9 +286,9 @@ struct DaySectionView: View {
         }
         guard let file = editFile else { return }
         // Quitting the editor auto-formats, same as ⌘S.
-        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
-        draft = normalized
-        base = normalized
+        let normalized = NoteFormatter.normalizedForSave(session.text, isToday: isToday, now: Date())
+        session.text = normalized
+        session.base = normalized
         store.write(text: normalized, to: file.url)
     }
 
@@ -292,24 +300,23 @@ struct DaySectionView: View {
     }
 
     private func scheduleSave(_ text: String) {
-        saveTask?.cancel()
+        session.cancelSave()
         guard let file = editFile else { return }
-        saveTask = Task {
+        let url = file.url
+        session.saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            let url = file.url
-            let payload = text
             await MainActor.run {
-                store.write(text: payload, to: url)
+                store.writeAsync(text: text, to: url)
             }
         }
     }
 
     private func flushSave() {
-        saveTask?.cancel()
+        session.cancelSave()
         // The scheduled task may have been cancelled before firing: save inline if dirty.
-        guard isEditing, let file = editFile, draft != file.text else { return }
-        store.write(text: draft, to: file.url)
+        guard isEditing, let file = editFile, session.text != file.text else { return }
+        store.write(text: session.text, to: file.url)
     }
 
     private static let dateFormatter: DateFormatter = {
