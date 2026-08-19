@@ -339,7 +339,7 @@ private struct ShortcutsTab: View {
             Section("Global Quick Add") {
                 Toggle("Enable system-wide shortcut", isOn: $settings.globalQuickAddEnabled)
                     .onChange(of: settings.globalQuickAddEnabled) { _, _ in
-                        MenuBarController.shared.refreshHotkey()
+                        GlobalQuickAddController.shared.refresh()
                     }
                 HStack {
                     Text(currentDisplay)
@@ -352,7 +352,7 @@ private struct ShortcutsTab: View {
                     if settings.quickAddHotkey != nil {
                         Button("Reset") {
                             settings.globalQuickAddSpec = AppSettings.HotkeySpec.defaultQuickAdd.storage
-                            MenuBarController.shared.refreshHotkey()
+                            GlobalQuickAddController.shared.refresh()
                         }
                         .disabled(recording)
                     }
@@ -361,7 +361,7 @@ private struct ShortcutsTab: View {
                     HotkeyRecorder(
                         onRecord: { spec in
                             settings.globalQuickAddSpec = spec.storage
-                            MenuBarController.shared.refreshHotkey()
+                            GlobalQuickAddController.shared.refresh()
                             recording = false
                         },
                         onCancel: { recording = false }
@@ -372,7 +372,7 @@ private struct ShortcutsTab: View {
                             .strokeBorder(Color.accentColor, lineWidth: 1)
                     )
                 }
-                Text("From any app: opens the DayStream menu bar panel with the caret on the task field. Shortcuts must include ⌘, ⌥ or ⌃.")
+                Text("From any app: opens DayStream and starts a new todo in today's note with the caret ready. Shortcuts must include ⌘, ⌥ or ⌃.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
