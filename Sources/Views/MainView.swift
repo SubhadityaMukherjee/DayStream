@@ -50,6 +50,17 @@ struct MainView: View {
         } message: {
             Text(appModel.carrySummary?.summary ?? "")
         }
+        .alert(
+            appModel.gitBackupResult?.success == true ? "Backup Finished" : "Backup Failed",
+            isPresented: Binding(
+                get: { appModel.gitBackupResult != nil },
+                set: { if !$0 { appModel.gitBackupResult = nil } }
+            )
+        ) {
+            Button("OK") { appModel.gitBackupResult = nil }
+        } message: {
+            Text(appModel.gitBackupResult?.message ?? "")
+        }
         .onAppear {
             appModel.goToToday()
         }
@@ -91,6 +102,7 @@ struct MainView: View {
 
 private struct SidebarView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @State private var showNewDeadline = false
 
@@ -137,6 +149,26 @@ private struct SidebarView: View {
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
+
+                if appModel.canGitBackupFromSidebar {
+                    Button {
+                        appModel.runGitBackup()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if appModel.isGitBackingUp {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Label(appModel.isGitBackingUp ? "Backing Up…" : "Back Up Vault",
+                                  systemImage: appModel.isGitBackingUp ? "arrow.triangle.2.circlepath" : "arrow.up.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .disabled(appModel.isGitBackingUp)
+                    .help("Commit the vault and push to its git remote")
+                }
             }
             .padding(.horizontal, 12)
 

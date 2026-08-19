@@ -15,6 +15,7 @@ final class AppSettings {
         static let autoCarry = "daystream.autoCarryForward"
         static let welcome = "daystream.hasSeenWelcome"
         static let gitBackupPath = "daystream.gitBackupPath"
+        static let gitBackupEnabled = "daystream.gitBackupEnabled"
     }
 
     /// 0 = system sans (SF Pro), 1 = serif (New York), 2 = rounded, 3 = monospace.
@@ -41,6 +42,10 @@ final class AppSettings {
     var gitBackupPath: String {
         didSet { UserDefaults.standard.set(gitBackupPath, forKey: Keys.gitBackupPath) }
     }
+    /// Git backup is enabled; when on, a Back Up button appears in the sidebar.
+    var gitBackupEnabled: Bool {
+        didSet { UserDefaults.standard.set(gitBackupEnabled, forKey: Keys.gitBackupEnabled) }
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -50,6 +55,7 @@ final class AppSettings {
         self.autoCarryForward = d.object(forKey: Keys.autoCarry) as? Bool ?? true
         self.hasSeenWelcome = d.bool(forKey: Keys.welcome)
         self.gitBackupPath = d.string(forKey: Keys.gitBackupPath) ?? ""
+        self.gitBackupEnabled = d.bool(forKey: Keys.gitBackupEnabled)
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {
