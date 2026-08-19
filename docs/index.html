@@ -78,7 +78,7 @@
     <a class="link" href="#shortcuts">Shortcuts</a>
     <a class="link" href="#vault-format">Vault format</a>
     <a class="link" href="#faq">FAQ</a>
-    <a class="link" href="https://github.com/SubhadityaMukherjee/daily_stream/releases">Download</a>
+    <a class="link" href="https://github.com/SubhadityaMukherjee/DayStream/releases">Download</a>
   </div>
 </nav>
 <div class="wrap">
@@ -88,12 +88,12 @@
     <h1>DayStream</h1>
     <p class="tagline">A fast, native daily-notes stream for your existing markdown vault.<br>Logseq-compatible, plain files, no lock-in.</p>
     <p>
-      <a class="cta" href="https://github.com/SubhadityaMukherjee/daily_stream/releases">Download for macOS</a>
+      <a class="cta" href="https://github.com/SubhadityaMukherjee/DayStream/releases">Download for macOS</a>
     </p>
     <p class="badges">
-      <a href="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml"><img src="https://github.com/SubhadityaMukherjee/daily_stream/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
-      <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases/latest"><img src="https://img.shields.io/github/v/release/SubhadityaMukherjee/daily_stream?display_name=tag&amp;sort=semver" alt="Latest release"></a>
-      <a href="https://github.com/SubhadityaMukherjee/daily_stream"><img src="https://img.shields.io/badge/platform-macOS%2015%2B-333" alt="Platform"></a>
+      <a href="https://github.com/SubhadityaMukherjee/DayStream/actions/workflows/build.yml"><img src="https://github.com/SubhadityaMukherjee/DayStream/actions/workflows/build.yml/badge.svg" alt="Build status"></a>
+      <a href="https://github.com/SubhadityaMukherjee/DayStream/releases/latest"><img src="https://img.shields.io/github/v/release/SubhadityaMukherjee/DayStream?display_name=tag&amp;sort=semver" alt="Latest release"></a>
+      <a href="https://github.com/SubhadityaMukherjee/DayStream"><img src="https://img.shields.io/badge/platform-macOS%2015%2B-333" alt="Platform"></a>
     </p>
   </div>
 
@@ -111,7 +111,7 @@
 
   <h2 id="getting-started">Getting started</h2>
   <ol>
-    <li>Download <code>DayStream-macOS.zip</code> from the <a href="https://github.com/SubhadityaMukherjee/daily_stream/releases">releases page</a> and unzip it.</li>
+    <li>Download <code>DayStream-macOS.zip</code> from the <a href="https://github.com/SubhadityaMukherjee/DayStream/releases">releases page</a> and unzip it.</li>
     <li>Move <strong>DayStream.app</strong> to <code>/Applications</code> (or <code>~/Applications</code>) and open it.</li>
     <li>Pick your vault — the folder that contains a <code>journals/</code> directory (a Logseq vault root works as-is).</li>
     <li>That's it. A one-page welcome introduces the features; today's note is created automatically — double-click it and start typing.</li>
@@ -209,8 +209,8 @@
   <p>Journal filenames: <code>yyyy-MM-dd.md</code> is canonical for new files; <code>yyyy_MM_dd.md</code> and <code>dd-MM-yyyy.md</code> are read transparently (and can be migrated in one click). Everything else — markers, properties (<code>Key:: value</code>), indentation — is plain Logseq markdown, so you can round-trip a vault between the two apps freely. The only DayStream-specific conventions are the optional <code>added::</code> / <code>completed::</code> timestamp properties, which Logseq simply shows as properties.</p>
 
   <h2 id="building">Building from source</h2>
-<pre><code>git clone https://github.com/SubhadityaMukherjee/daily_stream.git
-cd daily_stream
+<pre><code>git clone https://github.com/SubhadityaMukherjee/DayStream.git
+cd DayStream
 ./scripts/build_and_install            # Debug build → ~/Applications → launch
 ./scripts/build_and_install release    # Release build
 ./scripts/build_and_install test       # Build + run unit tests</code></pre>
@@ -231,7 +231,7 @@ cd daily_stream
     <li><strong>main</strong> — stable; releases are tagged from it (<code>v1.0.0</code>, <code>v1.1.0</code>, …) and published as GitHub Releases automatically.</li>
   </ul>
 
-  <p class="footer-note">DayStream is a personal project by Subhaditya Mukherjee. Found an issue? <a href="https://github.com/SubhadityaMukherjee/daily_stream/issues">Open one on GitHub</a>.</p>
+  <p class="footer-note">DayStream is a personal project by Subhaditya Mukherjee. Found an issue? <a href="https://github.com/SubhadityaMukherjee/DayStream/issues">Open one on GitHub</a>.</p>
 </div>
 </body>
 </html>
