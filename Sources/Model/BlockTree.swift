@@ -225,6 +225,52 @@ enum BlockTree {
         parseBullet(line)
     }
 
+    // MARK: - Code fence segmentation
+
+    /// A body line or a fenced code block extracted from raw lines.
+    enum BodySegment: Equatable {
+        case line(String)
+        case code(language: String?, lines: [String])
+    }
+
+    /// Splits raw lines into text lines and fenced code blocks (``` or ~~~).
+    /// An unclosed fence runs to the end of the input; fence content is kept
+    /// verbatim (indentation, blanks and all).
+    static func bodySegments(_ lines: [String]) -> [BodySegment] {
+        var segments: [BodySegment] = []
+        var i = 0
+        while i < lines.count {
+            let trimmed = lines[i].trimmingCharacters(in: .whitespaces)
+            if let marker = fenceMarker(trimmed) {
+                let language = String(trimmed.dropFirst(marker.count)).trimmingCharacters(in: .whitespaces)
+                var code: [String] = []
+                var j = i + 1
+                var closed = false
+                while j < lines.count {
+                    let inner = lines[j].trimmingCharacters(in: .whitespaces)
+                    if fenceMarker(inner) != nil {
+                        closed = true
+                        break
+                    }
+                    code.append(lines[j])
+                    j += 1
+                }
+                segments.append(.code(language: language.isEmpty ? nil : language, lines: code))
+                i = closed ? j + 1 : j
+                continue
+            }
+            segments.append(.line(lines[i]))
+            i += 1
+        }
+        return segments
+    }
+
+    static func fenceMarker(_ trimmed: String) -> String? {
+        if trimmed.hasPrefix("```") { return "```" }
+        if trimmed.hasPrefix("~~~") { return "~~~" }
+        return nil
+    }
+
     // MARK: - Todo toggling (surgical, preserves all other bytes)
 
     /// Returns the file text with the given block's todo state flipped.

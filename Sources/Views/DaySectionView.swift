@@ -248,30 +248,25 @@ struct DaySectionView: View {
     }
 
     private func endEditing() {
-        flushSave()
+        saveTask?.cancel()
+        guard isEditing else { return }
         isEditing = false
         if appModel.editingDay == day.date {
             appModel.editingDay = nil
         }
+        guard let file = editFile else { return }
+        // Quitting the editor auto-formats, same as ⌘S.
+        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
+        draft = normalized
+        base = normalized
+        store.write(text: normalized, to: file.url)
     }
 
     /// ⌘S: normalize the draft (drop empty bullets, space out top-level
     /// `[[wikilink]]` groups, stamp `added::` on today's new tasks), write it,
     /// and leave edit mode.
     private func saveAndQuit() {
-        saveTask?.cancel()
-        guard let file = editFile else {
-            endEditing()
-            return
-        }
-        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
-        draft = normalized
-        base = normalized
-        store.write(text: normalized, to: file.url)
-        isEditing = false
-        if appModel.editingDay == day.date {
-            appModel.editingDay = nil
-        }
+        endEditing()
     }
 
     private func scheduleSave(_ text: String) {

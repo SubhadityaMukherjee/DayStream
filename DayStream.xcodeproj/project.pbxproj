@@ -13,6 +13,7 @@
 		1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E026860706F7C832FDBE3CF /* VaultStore.swift */; };
 		2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86F2ED4411BBE44B6243822 /* DaySectionView.swift */; };
 		2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395EE5A200865344BF08F6C /* CalendarView.swift */; };
+		35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */; };
 		3A3F6731B5EA985E0F268EF4 /* WikiName.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF59C399937042AEE4E3CC43 /* WikiName.swift */; };
 		3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E42184F435A686A811D04BC /* SettingsView.swift */; };
 		3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7095D2E8BAAA3630B334211 /* MarkdownText.swift */; };
@@ -56,6 +57,7 @@
 		0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		15757316319E7B2BC0AF72BD /* BlockRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockRowView.swift; sourceTree = "<group>"; };
+		172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeBlockAndFormatTests.swift; sourceTree = "<group>"; };
 		19C1E6CA336FB755C292C968 /* Deadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Deadline.swift; sourceTree = "<group>"; };
 		2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayStreamApp.swift; sourceTree = "<group>"; };
 		224A113A4AF60A3A3D934061 /* GlassStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassStyle.swift; sourceTree = "<group>"; };
@@ -131,6 +133,7 @@
 			isa = PBXGroup;
 			children = (
 				620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */,
+				172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */,
 				69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */,
 				5D4BF23584F499B8D9BA92CE /* MultiFileDayTests.swift */,
 				73A71BA98B107AE412A2CD3D /* NoteFormatterTests.swift */,
@@ -288,6 +291,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */,
+				35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */,
 				92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */,
 				BEF7AA884ACA542AA2659A1F /* MultiFileDayTests.swift in Sources */,
 				64ED75AA0EBEA0AC25BC3820 /* NoteFormatterTests.swift in Sources */,
@@ -412,7 +416,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.5.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -521,7 +525,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.5.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
