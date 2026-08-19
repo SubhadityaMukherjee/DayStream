@@ -36,7 +36,7 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
 
             Button("Choose Vault Folder…") { chooseFolder() }
-                .buttonStyle(.borderedProminent)
+                .prominentActionButtonStyle()
                 .controlSize(.large)
 
             if let validation {
@@ -53,8 +53,8 @@ struct SetupView: View {
                         appModel.setupVault(at: url)
                     }
                 }
-                .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .prominentActionButtonStyle()
             }
 
             if let errorMessage {

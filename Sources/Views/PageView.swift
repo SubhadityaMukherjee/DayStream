@@ -208,10 +208,7 @@ struct PageView: View {
                 }
             }
             .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.quaternary.opacity(0.4))
-            )
+            .glassCardBackground(in: RoundedRectangle(cornerRadius: 8))
         }
     }
 

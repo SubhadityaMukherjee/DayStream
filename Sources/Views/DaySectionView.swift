@@ -65,7 +65,7 @@ struct DaySectionView: View {
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.18)))
+                    .tintedGlassBackground(Color.accentColor.opacity(0.2), in: Capsule())
                     .foregroundStyle(Color.accentColor)
             }
             if day.files.count > 1 {
@@ -82,7 +82,8 @@ struct DaySectionView: View {
                     Image(systemName: "trash")
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .glassButtonStyle()
+                .controlSize(.small)
                 .help("Delete this empty note")
                 .confirmationDialog(
                     "Delete the empty note for \(Self.dateFormatter.string(from: day.date))?",
@@ -102,10 +103,13 @@ struct DaySectionView: View {
                 Image(systemName: isEditing ? "checkmark.circle.fill" : "square.and.pencil")
                     .foregroundStyle(isEditing ? .green : .secondary)
             }
-            .buttonStyle(.plain)
+            .glassButtonStyle()
+            .controlSize(.small)
             .help(isEditing ? "Done (⎋)" : "Edit this day")
         }
-        .padding(.bottom, 2)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 10))
     }
 
     private var dayIsEmpty: Bool {
@@ -137,6 +141,8 @@ struct DaySectionView: View {
                 }
             )
             .padding(.horizontal, -6)
+            .padding(10)
+            .glassCardBackground(in: RoundedRectangle(cornerRadius: 12))
             .transition(.opacity)
         } else {
             VStack(alignment: .leading, spacing: 2) {
@@ -172,7 +178,9 @@ struct DaySectionView: View {
                 .foregroundStyle(.tertiary)
             Spacer()
         }
-        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 8))
         .contentShape(.rect)
         .simultaneousGesture(TapGesture(count: 2).onEnded {
             if isToday { startEditing() }

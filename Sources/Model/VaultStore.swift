@@ -67,6 +67,8 @@ final class VaultStore {
     private var lastSelfWrite: Date?
     /// Serial queue for cross-note todo syncing, so checkbox clicks stay snappy.
     private let syncQueue = DispatchQueue(label: "daystream.todocync", qos: .userInitiated)
+    /// Vault parsing for watcher-triggered reloads runs here, off the main thread.
+    private let reloadQueue = DispatchQueue(label: "daystream.reload", qos: .utility)
     let watchEnabled: Bool
 
     init(vaultURL: URL, watchEnabled: Bool = true) {
@@ -95,11 +97,12 @@ final class VaultStore {
 
     // MARK: - Loading
 
-    func reload() {
+    /// Pure load: reads every journal file, parses blocks, counts pages.
+    /// No state mutation, so it is safe to run off the main thread.
+    private func computeSnapshot() -> (days: [JournalDay], pageCount: Int) {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: journalsURL.path) else {
-            days = []
-            return
+            return ([], 0)
         }
         var byDay: [Date: [VaultFile]] = [:]
         for name in names.sorted() {
@@ -110,7 +113,7 @@ final class VaultStore {
             let day = JournalDate.startOfDay(date)
             byDay[day, default: []].append(VaultFile(url: url, date: day, text: text))
         }
-        days = byDay.map { day, files in
+        let newDays = byDay.map { day, files in
             // Same date in multiple filename formats: newest convention first.
             let f = files.sorted {
                 let ar = $0.url.journalFormatRank
@@ -121,13 +124,46 @@ final class VaultStore {
         }
         .sorted { $0.date > $1.date }
 
-        pageCount = ((try? fm.contentsOfDirectory(atPath: pagesURL.path)) ?? [])
+        let newPageCount = ((try? fm.contentsOfDirectory(atPath: pagesURL.path)) ?? [])
             .filter { $0.hasSuffix(".md") }
             .count
+        return (newDays, newPageCount)
+    }
+
+    /// Publishes a computed snapshot. Must run on the main thread (`days` is
+    /// observable state the UI reads).
+    private func applySnapshot(days newDays: [JournalDay], pageCount newPageCount: Int) {
+        days = newDays
+        pageCount = newPageCount
         pageNamesCache = nil
+    }
+
+    func reload() {
+        let snap = computeSnapshot()
+        applySnapshot(days: snap.days, pageCount: snap.pageCount)
 
         if watchEnabled {
             installWatchers()
+        }
+    }
+
+    /// Watcher-triggered reload: the same work as `reload()` with the file
+    /// I/O and parsing on a background queue, so external edits to a large
+    /// vault can never stall the main thread. Results land on the main thread.
+    private func reloadAsync() {
+        reloadQueue.async { [weak self] in
+            guard let self else { return }
+            let snap = self.computeSnapshot()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                // Skip a stale snapshot racing one of our own writes — those
+                // already refreshed the store in place with newer content.
+                if let last = self.lastSelfWrite, Date().timeIntervalSince(last) < 0.8 {
+                    return
+                }
+                self.applySnapshot(days: snap.days, pageCount: snap.pageCount)
+                self.onExternalChange?()
+            }
         }
     }
 
@@ -670,7 +706,9 @@ final class VaultStore {
 
     private func installWatchers() {
         guard watchers.isEmpty else { return }
-        for dir in [journalsURL, pagesURL, vaultURL] {
+        // In .journalsDirectory layout the vault URL *is* the journals URL;
+        // dedupe so the same directory isn't watched twice.
+        for dir in Set([journalsURL, pagesURL, vaultURL]) {
             let fd = open(dir.path, O_EVTONLY)
             guard fd >= 0 else { continue }
             let source = DispatchSource.makeFileSystemObjectSource(
@@ -678,9 +716,7 @@ final class VaultStore {
                 eventMask: [.write, .rename, .delete],
                 queue: DispatchQueue.global(qos: .utility)
             )
-            let dirPath = dir.path
             source.setEventHandler { [weak self] in
-                _ = dirPath
                 self?.scheduleReload()
             }
             source.setCancelHandler { close(fd) }
@@ -699,8 +735,7 @@ final class VaultStore {
             }
             self.reloadWorkItem?.cancel()
             let item = DispatchWorkItem { [weak self] in
-                self?.reload()
-                self?.onExternalChange?()
+                self?.reloadAsync()
             }
             self.reloadWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)

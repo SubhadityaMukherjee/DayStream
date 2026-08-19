@@ -136,7 +136,7 @@ struct BlockRowView: View {
             .foregroundStyle(.green)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Capsule().fill(Color.green.opacity(0.12)))
+            .tintedGlassBackground(Color.green.opacity(0.14), in: Capsule())
             .help(durationHelp ?? "")
         }
     }
@@ -173,7 +173,9 @@ struct BlockRowView: View {
         let visible = block.properties.filter { !hiddenPropertyKeys.contains($0.key.lowercased()) }
         if !visible.isEmpty {
             HStack(spacing: 6) {
-                ForEach(visible, id: \.key) { prop in
+                // Offset-keyed: hand-edited notes can repeat a key (e.g. two
+                // `status::` lines), and duplicate ids would crash the ForEach.
+                ForEach(Array(visible.enumerated()), id: \.offset) { _, prop in
                     HStack(spacing: 3) {
                         Text(prop.key)
                             .font(.caption2)
@@ -184,9 +186,7 @@ struct BlockRowView: View {
                     }
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(
-                        Capsule().fill(propertyColor(prop).opacity(0.12))
-                    )
+                    .tintedGlassBackground(propertyColor(prop).opacity(0.14), in: Capsule())
                 }
             }
         }

@@ -120,7 +120,7 @@ private struct SidebarView: View {
                     Label("Today", systemImage: "calendar.badge.clock")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -129,7 +129,7 @@ private struct SidebarView: View {
                     Label("Carry Forward Unfinished", systemImage: "arrow.down.forward.square")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderedProminent)
+                .prominentActionButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -138,7 +138,7 @@ private struct SidebarView: View {
                     Label("Deadline…", systemImage: "flag")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -147,7 +147,7 @@ private struct SidebarView: View {
                     Label("Recurring Tasks…", systemImage: "repeat")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
 
                 if appModel.canGitBackupFromSidebar {
@@ -164,12 +164,13 @@ private struct SidebarView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .glassButtonStyle()
                     .controlSize(.regular)
                     .disabled(appModel.isGitBackingUp)
                     .help("Commit the vault and push to its git remote")
                 }
             }
+            .glassContainer()
             .padding(.horizontal, 12)
 
             deadlineSection
@@ -312,7 +313,7 @@ private struct NewDeadlineSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                 Button("Add Deadline", action: add)
-                    .buttonStyle(.borderedProminent)
+                    .prominentActionButtonStyle()
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -383,10 +384,7 @@ struct SearchBarView: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(.quaternary.opacity(0.4))
-        )
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 7))
         .task(id: query) {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
@@ -423,8 +421,7 @@ struct SearchBarView: View {
             }
         }
         .frame(width: 460, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
+        .floatingPanelBackground(in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func row(_ hit: VaultStore.SearchHit) -> some View {
