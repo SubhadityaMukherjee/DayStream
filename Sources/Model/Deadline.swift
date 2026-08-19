@@ -27,24 +27,30 @@ struct Deadline: Identifiable, Codable, Equatable {
         return days
     }
 
-    /// Short relative label for the sidebar: "Overdue 2d", "Today", "Tomorrow", "Fri", "Aug 30".
+    /// Short relative label for the sidebar, always including the days left:
+    /// "Overdue 2d", "Today", "Tomorrow", "Fri · 3d", "Sep 30 · 43d".
     func label(from day: Date = Date(), calendar: Calendar = .current) -> String {
         let days = daysRemaining(from: day, calendar: calendar)
         if days < 0 { return "Overdue \(-days)d" }
         if days == 0 { return "Today" }
         if days == 1 { return "Tomorrow" }
-        if days <= 6 {
-            let f = DateFormatter()
-            f.calendar = calendar
-            f.dateFormat = "EEE"
-            return f.string(from: date)
-        }
-        let f = DateFormatter()
-        f.calendar = calendar
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f.string(from: date)
+        let dateText = days <= 6
+            ? Self.weekdayFormatter.string(from: date)
+            : Self.shortDateFormatter.string(from: date)
+        return "\(dateText) · \(days)d"
     }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "EEE"
+        return f
+    }()
+
+    private static let shortDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
 }
 
 /// UserDefaults-backed list of deadlines (JSON-encoded array), mirrored to

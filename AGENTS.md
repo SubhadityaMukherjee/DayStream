@@ -31,6 +31,8 @@ Always run `xcodegen generate` after creating/moving source files, and `./script
 
 ## Git / release flow
 
-- `develop` = active development; `main` = stable, tags `vX.Y.Z` cut from it.
-- CI (`.github/workflows/build.yml`): build + test on push, release zip on `v*` tags, deploy GitHub Pages on `main` pushes.
+- `develop` is the **default branch** and where all work lands — feature branches merge into it.
+- `main` is **release-only**: it is updated solely by merging `develop` for a release; no direct commits.
+- Releases: merge `develop` → `main`, bump `MARKETING_VERSION` in `project.yml`, tag `vX.Y.Z` on `main`, push the tag.
+- CI (`.github/workflows/build.yml`): build + test on pushes/PRs to `main`/`develop`, release zip on `v*` tags, deploy GitHub Pages on `main` pushes.
 - Commit style: short imperative subject lines, like existing history.

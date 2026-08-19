@@ -14,12 +14,12 @@ struct MainView: View {
             Divider()
 
             if let store = appModel.store {
-                VStack(spacing: 0) {
-                    SearchBarView()
-                    Divider()
-                    DailyStreamView(store: store)
-                        .id(store.vaultURL)
-                }
+                DailyStreamView(store: store)
+                    .id(store.vaultURL)
+                    .overlay(alignment: .bottomTrailing) {
+                        FloatingSearchView()
+                            .padding(20)
+                    }
             }
         }
         .frame(minWidth: 900, minHeight: 600)
@@ -49,6 +49,17 @@ struct MainView: View {
             Button("OK") { appModel.carrySummary = nil }
         } message: {
             Text(appModel.carrySummary?.summary ?? "")
+        }
+        .alert(
+            appModel.gitBackupResult?.success == true ? "Backup Finished" : "Backup Failed",
+            isPresented: Binding(
+                get: { appModel.gitBackupResult != nil },
+                set: { if !$0 { appModel.gitBackupResult = nil } }
+            )
+        ) {
+            Button("OK") { appModel.gitBackupResult = nil }
+        } message: {
+            Text(appModel.gitBackupResult?.message ?? "")
         }
         .onAppear {
             appModel.goToToday()
@@ -91,6 +102,7 @@ struct MainView: View {
 
 private struct SidebarView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @State private var showNewDeadline = false
 
@@ -108,7 +120,7 @@ private struct SidebarView: View {
                     Label("Today", systemImage: "calendar.badge.clock")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -117,7 +129,7 @@ private struct SidebarView: View {
                     Label("Carry Forward Unfinished", systemImage: "arrow.down.forward.square")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.borderedProminent)
+                .prominentActionButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -126,7 +138,7 @@ private struct SidebarView: View {
                     Label("Deadline…", systemImage: "flag")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
 
                 Button {
@@ -135,9 +147,30 @@ private struct SidebarView: View {
                     Label("Recurring Tasks…", systemImage: "repeat")
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .buttonStyle(.bordered)
+                .glassButtonStyle()
                 .controlSize(.regular)
+
+                if appModel.canGitBackupFromSidebar {
+                    Button {
+                        appModel.runGitBackup()
+                    } label: {
+                        HStack(spacing: 6) {
+                            if appModel.isGitBackingUp {
+                                ProgressView()
+                                    .controlSize(.small)
+                            }
+                            Label(appModel.isGitBackingUp ? "Backing Up…" : "Back Up Vault",
+                                  systemImage: appModel.isGitBackingUp ? "arrow.triangle.2.circlepath" : "arrow.up.circle")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .glassButtonStyle()
+                    .controlSize(.regular)
+                    .disabled(appModel.isGitBackingUp)
+                    .help("Commit the vault and push to its git remote")
+                }
             }
+            .glassContainer()
             .padding(.horizontal, 12)
 
             deadlineSection
@@ -280,7 +313,7 @@ private struct NewDeadlineSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                 Button("Add Deadline", action: add)
-                    .buttonStyle(.borderedProminent)
+                    .prominentActionButtonStyle()
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -299,30 +332,69 @@ private struct NewDeadlineSheet: View {
     }
 }
 
-/// Search field above the stream with a dropdown of matches across every
-/// journal and page. Journals jump to their day; pages open in a sheet.
-struct SearchBarView: View {
+/// Floating search access: a glass button pinned bottom-right of the stream
+/// (⌘F toggles) that expands into a panel with the field and top matches.
+/// Journals jump to their day; pages open in a sheet.
+struct FloatingSearchView: View {
     @Environment(AppModel.self) private var appModel
+    @State private var expanded = false
     @State private var query = ""
     @State private var hits: [VaultStore.SearchHit] = []
     @FocusState private var focused: Bool
 
-    private var isExpanded: Bool {
-        focused && !query.trimmingCharacters(in: .whitespaces).isEmpty
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 10) {
+            if expanded {
+                panel
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+            toggleButton
+        }
     }
 
-    var body: some View {
-        field
-            .overlay(alignment: .topLeading) {
-                if isExpanded {
-                    panel
-                        .offset(y: 36)
+    private var toggleButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+        } label: {
+            Image(systemName: expanded ? "xmark" : "magnifyingglass")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 38, height: 38)
+                .contentShape(.rect)
+        }
+        .glassButtonStyle()
+        .keyboardShortcut("f", modifiers: .command)
+        .help("Search all notes and pages (⌘F)")
+    }
+
+    /// Field + top matches in one glass panel. Content-sized: a "more" footer
+    /// instead of an inner scroll view (scroll views are greedy and break sizing).
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            field
+            if !hits.isEmpty {
+                Divider().padding(.vertical, 4)
+                ForEach(hits.prefix(8)) { hit in
+                    row(hit)
                 }
+                if hits.count > 8 {
+                    Text("\(hits.count - 8) more — press ⏎ for the top match")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                }
+            } else if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+                Text("No matches")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(.tertiary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
-            .background(.bar)
-            .zIndex(10)
+        }
+        .frame(width: 440, alignment: .leading)
+        .floatingPanelBackground(in: RoundedRectangle(cornerRadius: 12))
+        .onAppear { focused = true }
     }
 
     private var field: some View {
@@ -339,7 +411,6 @@ struct SearchBarView: View {
                 Button {
                     query = ""
                     hits = []
-                    focused = false
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
@@ -349,12 +420,8 @@ struct SearchBarView: View {
                 .help("Clear search")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(.quaternary.opacity(0.4))
-        )
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .task(id: query) {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
@@ -365,34 +432,6 @@ struct SearchBarView: View {
             guard !Task.isCancelled else { return }
             hits = appModel.store?.search(trimmed, limit: 20) ?? []
         }
-    }
-
-    /// Content-sized dropdown: top matches only, with a "more" footer instead
-    /// of an inner scroll view (scroll views are greedy and break sizing).
-    private var panel: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if hits.isEmpty {
-                Text("No matches")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-            } else {
-                ForEach(hits.prefix(8)) { hit in
-                    row(hit)
-                }
-                if hits.count > 8 {
-                    Text("\(hits.count - 8) more — press ⏎ for the top match")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                }
-            }
-        }
-        .frame(width: 460, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-        .shadow(color: .black.opacity(0.15), radius: 8, y: 3)
     }
 
     private func row(_ hit: VaultStore.SearchHit) -> some View {
@@ -426,6 +465,7 @@ struct SearchBarView: View {
     }
 
     private func open(_ hit: VaultStore.SearchHit) {
+        withAnimation(.easeInOut(duration: 0.15)) { expanded = false }
         query = ""
         hits = []
         focused = false

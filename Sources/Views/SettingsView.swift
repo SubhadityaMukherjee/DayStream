@@ -320,13 +320,13 @@ private struct RecurringTab: View {
     }
 }
 
-/// Git-backed vault backup: detect or pick the repository folder (which may
-/// be a parent of the vault), then commit everything and push via the git CLI.
+/// Git-backed vault backup: enable toggle, detect or pick the repository
+/// folder (which may be a parent of the vault), then commit everything and
+/// push via the git CLI. When enabled, a Back Up button also appears in the
+/// sidebar; both share the same run state.
 private struct AdvancedTab: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
-    @State private var backupResult: GitBackup.Result?
-    @State private var isBackingUp = false
 
     private var repoURL: URL? {
         let path = settings.gitBackupPath
@@ -338,8 +338,14 @@ private struct AdvancedTab: View {
     }
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Git Backup") {
+                Toggle("Enable git backup", isOn: $settings.gitBackupEnabled)
+                Text("When enabled, a Back Up Vault button appears in the sidebar for one-click backup.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 if !GitBackup.gitAvailable {
                     Label("git is not installed on this Mac — backup is unavailable.", systemImage: "exclamationmark.triangle")
                         .font(.caption)
@@ -375,11 +381,12 @@ private struct AdvancedTab: View {
                         }
                     }
                 }
+                .disabled(!settings.gitBackupEnabled)
 
                 Button {
-                    runBackup()
+                    appModel.runGitBackup()
                 } label: {
-                    if isBackingUp {
+                    if appModel.isGitBackingUp {
                         HStack(spacing: 6) {
                             ProgressView().controlSize(.small)
                             Text("Backing Up…")
@@ -388,7 +395,7 @@ private struct AdvancedTab: View {
                         Text("Back Up Now")
                     }
                 }
-                .disabled(!GitBackup.gitAvailable || !repoIsValid || isBackingUp)
+                .disabled(!settings.gitBackupEnabled || !GitBackup.gitAvailable || !repoIsValid || appModel.isGitBackingUp)
 
                 Text("Runs git add -A, commits with the message “\(GitBackup.commitMessage)”, and pushes to the repository's remote.")
                     .font(.caption)
@@ -402,18 +409,18 @@ private struct AdvancedTab: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 430)
+        .frame(width: 460, height: 470)
         .onAppear { autoDetectRepo() }
         .alert(
-            backupResult?.success == true ? "Backup Finished" : "Backup Failed",
+            appModel.gitBackupResult?.success == true ? "Backup Finished" : "Backup Failed",
             isPresented: Binding(
-                get: { backupResult != nil },
-                set: { if !$0 { backupResult = nil } }
+                get: { appModel.gitBackupResult != nil },
+                set: { if !$0 { appModel.gitBackupResult = nil } }
             )
         ) {
-            Button("OK") { backupResult = nil }
+            Button("OK") { appModel.gitBackupResult = nil }
         } message: {
-            Text(backupResult?.message ?? "")
+            Text(appModel.gitBackupResult?.message ?? "")
         }
     }
 
@@ -423,7 +430,7 @@ private struct AdvancedTab: View {
     }
 
     private func autoDetectRepo() {
-        guard settings.gitBackupPath.isEmpty, let repo = detectedRepo else { return }
+        guard settings.gitBackupEnabled, settings.gitBackupPath.isEmpty, let repo = detectedRepo else { return }
         settings.gitBackupPath = repo.path
     }
 
@@ -435,17 +442,5 @@ private struct AdvancedTab: View {
         panel.message = "Pick the git repository folder (it may be the parent of your vault)"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         settings.gitBackupPath = url.path
-    }
-
-    private func runBackup() {
-        guard let repo = repoURL else { return }
-        isBackingUp = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            let result = GitBackup.backup(repo: repo)
-            DispatchQueue.main.async {
-                backupResult = result
-                isBackingUp = false
-            }
-        }
     }
 }

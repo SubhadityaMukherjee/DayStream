@@ -68,7 +68,7 @@ struct WelcomeView: View {
                 Text("Get Started")
                     .frame(minWidth: 120)
             }
-            .buttonStyle(.borderedProminent)
+            .prominentActionButtonStyle()
             .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .padding(.top, 22)

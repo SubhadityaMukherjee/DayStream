@@ -82,6 +82,12 @@ final class AppModel {
         // pick up hand-edited entries from the file before seeding today.
         deadlines.vaultFileURL = store.deadlinesFileURL
         deadlines.syncWithVaultFile()
+        // Git backup: auto-detect the repo (vault itself or a parent) once,
+        // so the sidebar button works without visiting Settings first.
+        if AppSettings.shared.gitBackupEnabled, AppSettings.shared.gitBackupPath.isEmpty,
+           let repo = GitBackup.containingRepo(for: store.vaultRootURL) {
+            AppSettings.shared.gitBackupPath = repo.path
+        }
         ensureTodayExists()
         applyScheduledForToday()
     }
@@ -143,6 +149,41 @@ final class AppModel {
         let result = store.carryForward()
         carrySummary = result
         ensureTodayExists()
+    }
+
+    // MARK: - Git backup
+
+    /// Result of the last backup run; surfaced as an alert wherever it was
+    /// triggered from (sidebar or Settings → Advanced).
+    var gitBackupResult: GitBackup.Result?
+    var isGitBackingUp = false
+
+    func runGitBackup() {
+        guard !isGitBackingUp else { return }
+        let path = AppSettings.shared.gitBackupPath
+        guard !path.isEmpty, GitBackup.isGitRepo(URL(fileURLWithPath: path)) else {
+            gitBackupResult = GitBackup.Result(
+                success: false,
+                message: "No usable git repository configured. Pick one in Settings → Advanced.")
+            return
+        }
+        let repo = URL(fileURLWithPath: path)
+        isGitBackingUp = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = GitBackup.backup(repo: repo)
+            DispatchQueue.main.async {
+                self?.gitBackupResult = result
+                self?.isGitBackingUp = false
+            }
+        }
+    }
+
+    /// True when the sidebar backup button should be shown.
+    var canGitBackupFromSidebar: Bool {
+        guard AppSettings.shared.gitBackupEnabled, !AppSettings.shared.gitBackupPath.isEmpty else {
+            return false
+        }
+        return GitBackup.isGitRepo(URL(fileURLWithPath: AppSettings.shared.gitBackupPath))
     }
 
     // MARK: - Scheduled work (recurring + deadlines + auto carry-forward)

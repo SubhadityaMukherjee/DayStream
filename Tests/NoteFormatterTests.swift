@@ -216,8 +216,9 @@ final class DeadlineTests: XCTestCase {
         XCTAssertEqual(Deadline(title: "a", date: date("2026-08-18")).label(from: today), "Today")
         XCTAssertEqual(Deadline(title: "a", date: date("2026-08-19")).label(from: today), "Tomorrow")
         // 2026-08-18 is a Tuesday; +3 = Friday.
-        XCTAssertEqual(Deadline(title: "a", date: date("2026-08-21")).label(from: today), "Fri")
+        XCTAssertEqual(Deadline(title: "a", date: date("2026-08-21")).label(from: today), "Fri · 3d")
         XCTAssertEqual(Deadline(title: "a", date: date("2026-08-16")).label(from: today), "Overdue 2d")
+        XCTAssertEqual(Deadline(title: "a", date: date("2026-09-01")).label(from: today), "Sep 1 · 14d")
         XCTAssertTrue(Deadline(title: "a", date: date("2026-09-30")).label(from: today).contains("Sep"))
     }
 

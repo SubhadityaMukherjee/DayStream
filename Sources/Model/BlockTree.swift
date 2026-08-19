@@ -55,19 +55,6 @@ struct Block: Identifiable {
         }
         return .none
     }
-
-    /// `- TODO foo` -> `- DONE foo` (and back), preserving the rest of the line.
-    var toggledFirstLine: String? {
-        guard let first = rawLines.first else { return nil }
-        if let marker {
-            let newMarker = marker == "DONE" ? "TODO" : "DONE"
-            if let r = first.range(of: marker) {
-                return first.replacingCharacters(in: r, with: newMarker)
-            }
-            return nil
-        }
-        return nil
-    }
 }
 
 enum BlockTree {

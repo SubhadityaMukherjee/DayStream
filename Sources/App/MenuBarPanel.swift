@@ -24,7 +24,7 @@ struct MenuBarPanel: View {
                     Button("Open DayStream") {
                         openMainWindow()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .prominentActionButtonStyle()
                     .controlSize(.small)
                 }
                 .padding()
@@ -88,10 +88,7 @@ struct MenuBarPanel: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 7)
-                    .fill(.quaternary.opacity(0.35))
-            )
+            .glassCardBackground(in: RoundedRectangle(cornerRadius: 7))
 
             if scheduling {
                 DatePicker(

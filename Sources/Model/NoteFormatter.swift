@@ -97,7 +97,7 @@ enum NoteFormatter {
             guard let bullet = BlockTree.bulletInfo(line),
                   let marker = bullet.marker,
                   marker != "DONE",
-                  blockHasProperty(&lines, bulletIndex: i, key: "added") == false
+                  blockHasProperty(lines, bulletIndex: i, key: "added") == false
             else { continue }
             let indent = String(repeating: "\t", count: bullet.indent + 1)
             insertions.append((i + 1, indent + "added:: " + timestamp(date)))
@@ -110,7 +110,7 @@ enum NoteFormatter {
     }
 
     /// True when the block starting at `bulletIndex` carries `Key:: value`.
-    private static func blockHasProperty(_ lines: inout [String], bulletIndex: Int, key: String) -> Bool {
+    private static func blockHasProperty(_ lines: [String], bulletIndex: Int, key: String) -> Bool {
         guard lines.indices.contains(bulletIndex) else { return false }
         var j = bulletIndex + 1
         while lines.indices.contains(j) {

@@ -36,7 +36,7 @@ struct MarkdownText: View {
                 } else {
                     link.link = URL(string: "daystream://page?name=" + encodeName(name))
                 }
-                link.foregroundColor = .accentColor
+                link.foregroundColor = Color.readableLink
                 link.underlineStyle = .single
                 if strikethrough {
                     link.strikethroughStyle = .single

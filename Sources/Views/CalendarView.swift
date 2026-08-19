@@ -117,10 +117,12 @@ struct CalendarView: View {
                     .opacity(hasNote ? 1 : 0)
             }
             .frame(maxWidth: .infinity, minHeight: 30)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isToday ? Color.accentColor : .clear)
-            )
+            // Glass only on the today cell — not all 30+ cells of the grid.
+            .background {
+                if isToday {
+                    Color.clear.tintedGlassBackground(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                }
+            }
         }
         .buttonStyle(.plain)
         .help(hasNote ? "Jump to \(dateString(date))" : "Create a note for \(dateString(date))")
@@ -158,10 +160,15 @@ struct CalendarView: View {
         }
     }
 
-    private func dateString(_ date: Date) -> String {
+    private static let mediumDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
-        return f.string(from: date)
+        f.timeStyle = .none
+        return f
+    }()
+
+    private func dateString(_ date: Date) -> String {
+        Self.mediumDateFormatter.string(from: date)
     }
 }
 
@@ -223,10 +230,11 @@ private struct MonthYearPicker: View {
                             .foregroundStyle(isCurrent ? Color.white : Color.primary)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(isCurrent ? Color.accentColor : .clear)
-                            )
+                            .background {
+                                if isCurrent {
+                                    Color.clear.tintedGlassBackground(Color.accentColor, in: RoundedRectangle(cornerRadius: 6))
+                                }
+                            }
                     }
                     .buttonStyle(.plain)
                 }

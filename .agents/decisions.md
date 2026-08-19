@@ -76,3 +76,7 @@ Quick-add, recurring injection, and ⌘S on *today's* note stamp open tasks with
 - **Welcome window:** one-page Apple-style popup on first launch only (`AppSettings.hasSeenWelcome`), sheet on RootView.
 - **Deadlines mirror:** `DeadlineStore` still uses UserDefaults as behavioral source of truth but mirrors to `<vault root>/deadlines.md` (`- [yyyy-MM-dd] Title`) on every change; `syncWithVaultFile()` merges hand-edited entries when a vault connects (union by title+date, local-timezone dates).
 - **Git backup (Settings → Advanced):** `GitBackup` wraps the git CLI — `add -A`, commit "backing up files", `push`, with `GIT_TERMINAL_PROMPT=0` so it fails instead of hanging on credential prompts. Repo folder is auto-detected up to 4 levels above the vault root (repo may be a parent folder) and can be overridden via NSOpenPanel; path persists in `AppSettings.gitBackupPath`. Result surfaces in an alert (success/failure with git's tail output).
+
+## Git backup toggle + sidebar button
+
+`AppSettings.gitBackupEnabled` (default off) gates the feature. Execution is centralized in `AppModel.runGitBackup()` (shared `isGitBackingUp` prevents double-runs; result lands in `gitBackupResult`). The sidebar shows a "Back Up Vault" button when enabled + repo valid (`canGitBackupFromSidebar`); both the sidebar (via MainView) and Settings → Advanced present alerts bound to the same result state. Enabling the toggle also auto-detects the repo at/above the vault on the next vault connect (AdvancedTab's onAppear and `setupVault` both fill `gitBackupPath` when empty).

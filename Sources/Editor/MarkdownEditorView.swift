@@ -14,7 +14,9 @@ import AppKit
 /// - Live highlighting of markers, `[[wikilinks]]`, code spans, headings
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
-    var font: NSFont = AppSettings.shared.editorFont()
+    /// nil = resolve from settings at view-update time. A concrete default
+    /// here would run AppSettings lookups on every struct re-creation.
+    var font: NSFont? = nil
     /// Importer for dropped images; nil disables image importing.
     var imageImporter: ((Data, String?) -> String?)? = nil
     /// Existing `[[page]]` names for autocomplete; nil disables suggestions.
@@ -25,7 +27,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> EditorScrollView {
         let tv = EditorTextView()
-        tv.font = font
+        tv.font = font ?? AppSettings.shared.editorFont()
         tv.textColor = .labelColor
         tv.drawsBackground = false
         tv.isRichText = false
@@ -66,12 +68,13 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func updateNSView(_ nsView: EditorScrollView, context: Context) {
         guard let tv = nsView.editor else { return }
+        let resolvedFont = font ?? AppSettings.shared.editorFont()
         if tv.string != text, !context.coordinator.isEditingLocally {
             tv.string = text
             tv.highlight()
         }
-        if tv.font != font {
-            tv.font = font
+        if tv.font != resolvedFont {
+            tv.font = resolvedFont
             tv.highlight()
         }
         nsView.invalidateIntrinsicContentSize()
@@ -317,7 +320,8 @@ final class EditorTextView: NSTextView {
         }
         let selected = s.substring(with: range)
         insertText(prefix + selected + suffix, replacementRange: range)
-        selectedRange = NSRange(location: range.location + prefix.count, length: selected.count)
+        // UTF-16: selection content may contain astral chars (emoji).
+        selectedRange = NSRange(location: range.location + prefix.count, length: (selected as NSString).length)
     }
 
     // MARK: - `[[wikilink]]` autocomplete
@@ -424,7 +428,9 @@ final class EditorTextView: NSTextView {
 
         if isEmptyBullet {
             // Exit the list: clear the empty bullet and insert a plain newline.
-            let clearRange = NSRange(location: lineStart, length: lineText.count)
+            // UTF-16 length: text before the caret can contain astral chars
+            // (emoji), where Swift's scalar count diverges from NSString's.
+            let clearRange = NSRange(location: lineStart, length: (lineText as NSString).length)
             replaceCharacters(in: clearRange, with: "")
             super.insertNewline(sender)
             return
@@ -614,7 +620,7 @@ final class EditorTextView: NSTextView {
     private var markerColors: [String: NSColor] {
         [
             "TODO": .systemOrange,
-            "DOING": .systemBlue,
+            "DOING": NSColor.readableLink,
             "LATER": .systemPurple,
             "NOW": .systemRed,
             "DONE": .systemGreen,
@@ -637,14 +643,17 @@ final class EditorTextView: NSTextView {
         let lines = text.components(separatedBy: "\n")
         var lineStart = 0
         for line in lines {
-            defer { lineStart += line.count + 1 }
+            // UTF-16 offsets: emoji make a line's scalar count diverge from
+            // its storage length, which would shift every later attribute.
+            let lineLen = (line as NSString).length
+            defer { lineStart += lineLen + 1 }
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
             let indentLen = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
 
             // Headings.
             if trimmed.hasPrefix("#") {
-                let r = NSRange(location: lineStart, length: line.count)
+                let r = NSRange(location: lineStart, length: lineLen)
                 storage.addAttributes([
                     .font: NSFont.systemFont(ofSize: baseFont.pointSize + 1.5, weight: .semibold),
                 ], range: r)
@@ -678,7 +687,7 @@ final class EditorTextView: NSTextView {
             }
         }
         paint(pattern: #"\[\[[^\[\]\n]+\]\]"#, attributes: [
-            .foregroundColor: NSColor.controlAccentColor,
+            .foregroundColor: NSColor.readableLink,
         ])
         paint(pattern: #"`[^`\n]+`"#, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular),
