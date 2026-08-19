@@ -620,7 +620,7 @@ final class EditorTextView: NSTextView {
     private var markerColors: [String: NSColor] {
         [
             "TODO": .systemOrange,
-            "DOING": .systemBlue,
+            "DOING": NSColor.readableLink,
             "LATER": .systemPurple,
             "NOW": .systemRed,
             "DONE": .systemGreen,
@@ -687,7 +687,7 @@ final class EditorTextView: NSTextView {
             }
         }
         paint(pattern: #"\[\[[^\[\]\n]+\]\]"#, attributes: [
-            .foregroundColor: NSColor.controlAccentColor,
+            .foregroundColor: NSColor.readableLink,
         ])
         paint(pattern: #"`[^`\n]+`"#, attributes: [
             .font: NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular),

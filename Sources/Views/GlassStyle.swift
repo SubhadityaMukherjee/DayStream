@@ -1,4 +1,22 @@
 import SwiftUI
+import AppKit
+
+/// Link blue tuned for legibility on glass surfaces — stock control-accent
+/// washes out over frosted backgrounds, especially in light mode.
+extension NSColor {
+    static var readableLink: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor(srgbRed: 0.40, green: 0.64, blue: 1.00, alpha: 1)
+                : NSColor(srgbRed: 0.02, green: 0.26, blue: 0.68, alpha: 1)
+        }
+    }
+}
+
+extension Color {
+    static var readableLink: Color { Color(nsColor: .readableLink) }
+}
 
 /// Liquid Glass adoption with graceful fallbacks: the app targets macOS 15,
 /// so every glass API (new in macOS 26) is availability-gated and older

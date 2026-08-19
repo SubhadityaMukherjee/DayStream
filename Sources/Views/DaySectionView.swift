@@ -65,8 +65,8 @@ struct DaySectionView: View {
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 7)
                     .padding(.vertical, 2)
-                    .tintedGlassBackground(Color.accentColor.opacity(0.2), in: Capsule())
-                    .foregroundStyle(Color.accentColor)
+                    .tintedGlassBackground(Color.accentColor.opacity(0.85), in: Capsule())
+                    .foregroundStyle(.white)
             }
             if day.files.count > 1 {
                 Text("\(day.files.count) files")
