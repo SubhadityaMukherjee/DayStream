@@ -15,6 +15,8 @@ struct DaySectionView: View {
     @State private var base = ""
     @State private var saveTask: Task<Void, Never>?
     @State private var confirmDelete = false
+    /// Incremented by addTodo; lands the caret after the appended "- TODO ".
+    @State private var caretAtEndRequest = 0
 
     private var isToday: Bool {
         day.date == JournalDate.startOfDay(Date())
@@ -45,6 +47,16 @@ struct DaySectionView: View {
                 endEditing()
             }
         }
+        .onChange(of: day.date) { _, _ in
+            // The stream's List recycles rows: if this cell is handed a
+            // different day, drop any leftover edit state from the old one
+            // (pending saves were already flushed by onDisappear).
+            saveTask?.cancel()
+            saveTask = nil
+            isEditing = false
+            draft = ""
+            base = ""
+        }
         .onChange(of: editFile?.text) { _, newText in
             // External change (carry-forward, another editor, file watcher):
             // adopt it if the user hasn't typed since the last sync, so a
@@ -58,45 +70,61 @@ struct DaySectionView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Text(Self.dateFormatter.string(from: day.date))
-                .font(settings.dayHeadingFont)
-            Text(Self.weekdayFormatter.string(from: day.date))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            if isToday {
-                Text("Today")
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .tintedGlassBackground(Color.accentColor.opacity(0.85), in: Capsule())
-                    .foregroundStyle(.white)
-            }
-            if day.files.count > 1 {
-                Text("\(day.files.count) files")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .help("This date exists in multiple filename formats (e.g. 2026_08_14.md and 2026-08-14.md). Editing targets the file with content.")
-            }
-            Spacer()
-            if dayIsEmpty {
-                Button {
-                    confirmDelete = true
-                } label: {
-                    Image(systemName: "trash")
-                        .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(Self.dateFormatter.string(from: day.date))
+                    .font(settings.dayHeadingFont)
+                Text(Self.weekdayFormatter.string(from: day.date))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                if isToday {
+                    Text("Today")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2)
+                        .tintedGlassBackground(Color.accentColor.opacity(0.85), in: Capsule())
+                        .foregroundStyle(.white)
                 }
-                .glassButtonStyle()
-                .controlSize(.small)
-                .help("Delete this empty note")
-                .confirmationDialog(
-                    "Delete the empty note for \(Self.dateFormatter.string(from: day.date))?",
-                    isPresented: $confirmDelete,
-                    titleVisibility: .visible
-                ) {
-                    Button("Delete Note", role: .destructive) { deleteEmptyDay() }
+                if day.files.count > 1 {
+                    Text("\(day.files.count) files")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .help("This date exists in multiple filename formats (e.g. 2026_08_14.md and 2026-08-14.md). Editing targets the file with content.")
+                }
+                Spacer()
+                if dayIsEmpty {
+                    Button {
+                        confirmDelete = true
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.roundIcon(.red))
+                    .help("Delete this empty note")
+                    .confirmationDialog(
+                        "Delete the empty note for \(Self.dateFormatter.string(from: day.date))?",
+                        isPresented: $confirmDelete,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete Note", role: .destructive) { deleteEmptyDay() }
+                    }
                 }
             }
+
+            editorControls
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var editorControls: some View {
+        HStack(spacing: 4) {
+            Button(action: addTodo) {
+                Image(systemName: "plus")
+            }
+            .buttonStyle(.roundIcon)
+            .help("Add a task to this day")
+
             Button {
                 if isEditing {
                     endEditing()
@@ -104,16 +132,29 @@ struct DaySectionView: View {
                     startEditing()
                 }
             } label: {
-                Image(systemName: isEditing ? "checkmark.circle.fill" : "square.and.pencil")
-                    .foregroundStyle(isEditing ? .green : .secondary)
+                Image(systemName: isEditing ? "checkmark" : "square.and.pencil")
             }
-            .glassButtonStyle()
-            .controlSize(.small)
+            .buttonStyle(.roundIcon(isEditing ? .green : .secondary))
             .help(isEditing ? "Done (⎋)" : "Edit this day")
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .glassCardBackground(in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    /// "+" — append a fresh `- TODO ` line and open the editor with the
+    /// caret after it, so only the task title needs typing.
+    private func addTodo() {
+        flushSave()
+        let ensured = store.ensureDayFile(for: day.date)
+        let baseText = isEditing ? draft : ensured.text
+        let separator = baseText.isEmpty || baseText.hasSuffix("\n") ? "" : "\n"
+        let newText = baseText + separator + "- TODO "
+        draft = newText
+        base = newText
+        caretAtEndRequest += 1
+        if !isEditing {
+            isEditing = true
+            appModel.editingDay = day.date
+        }
+        store.write(text: newText, to: ensured.url)
     }
 
     private var dayIsEmpty: Bool {
@@ -142,7 +183,8 @@ struct DaySectionView: View {
                 },
                 onSaveCommit: {
                     saveAndQuit()
-                }
+                },
+                caretAtEndRequest: caretAtEndRequest
             )
             .padding(.horizontal, -6)
             .padding(10)

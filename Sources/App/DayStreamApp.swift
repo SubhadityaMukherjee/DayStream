@@ -12,7 +12,7 @@ struct DayStreamApp: App {
                 .environment(settings)
         }
         .windowStyle(.automatic)
-        .windowToolbarStyle(.unified(showsTitle: true))
+        .windowToolbarStyle(.unified(showsTitle: false))
 
         MenuBarExtra("DayStream", systemImage: "note.text") {
             MenuBarPanel()
@@ -32,6 +32,14 @@ struct DayStreamApp: App {
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
+    /// Captured at launch. Once the welcome has run (or was seen in a past
+    /// launch) it never re-presents mid-session; Settings → Advanced only
+    /// flags it for the *next* launch.
+    @State private var welcomeDoneThisSession: Bool
+
+    init() {
+        _welcomeDoneThisSession = State(initialValue: AppSettings.shared.hasSeenWelcome)
+    }
 
     var body: some View {
         Group {
@@ -43,9 +51,12 @@ struct RootView: View {
         }
         .frame(minWidth: 980, minHeight: 640)
         .sheet(isPresented: Binding(
-            get: { !settings.hasSeenWelcome },
+            get: { !settings.hasSeenWelcome && !welcomeDoneThisSession },
             set: { shown in
-                if !shown { settings.hasSeenWelcome = true }
+                if !shown {
+                    welcomeDoneThisSession = true
+                    settings.hasSeenWelcome = true
+                }
             }
         )) {
             WelcomeView()

@@ -122,6 +122,10 @@ private struct GeneralTab: View {
                 Text("When a new day starts (app launch or midnight rollover), unfinished tasks from previous days are copied into the new day's note automatically. Never duplicates.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                Toggle("Carry unfinished tasks into new date notes", isOn: $settings.carryForwardOnNewDate)
+                Text("Creating a note for another date — from the calendar, a deadline, or a [[date link]] — also copies unfinished tasks from earlier days into it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             Section("Maintenance") {
                 Button("Delete empty notes…", action: deleteEmptyNotes)
@@ -398,6 +402,15 @@ private struct AdvancedTab: View {
                 .disabled(!settings.gitBackupEnabled || !GitBackup.gitAvailable || !repoIsValid || appModel.isGitBackingUp)
 
                 Text("Runs git add -A, commits with the message “\(GitBackup.commitMessage)”, and pushes to the repository's remote.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Welcome") {
+                Button("Show Welcome Tour on Next Launch") {
+                    settings.hasSeenWelcome = false
+                }
+                Text("Replays the one-page intro the next time DayStream opens.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

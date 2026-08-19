@@ -413,16 +413,24 @@ final class VaultStore {
 
     // MARK: - Carry forward
 
+    @discardableResult
     func carryForward() -> CarryResult {
-        let (targetURL, todayText) = ensureTodayFile()
-        let today = JournalDate.startOfDay(Date())
+        carryForward(to: Date())
+    }
+
+    /// Copies unfinished tasks from before `target` into that date's note.
+    /// Duplicate-checked against the target, so it is safe to re-run.
+    @discardableResult
+    func carryForward(to target: Date) -> CarryResult {
+        let day = JournalDate.startOfDay(target)
+        let (targetURL, targetText) = ensureDayFile(for: day)
         let previous = days
-            .filter { $0.date < today }
-            .flatMap { day in day.files.map { (date: day.date, text: $0.text) } }
-        let (newText, result) = CarryForwardService.carryForward(allFiles: previous, todayText: todayText)
+            .filter { $0.date < day }
+            .flatMap { d in d.files.map { (date: d.date, text: $0.text) } }
+        let (newText, result) = CarryForwardService.carryForward(allFiles: previous, todayText: targetText)
         if result.carriedCount > 0 {
             write(text: newText, to: targetURL)
-            if !days.contains(where: { $0.date == today }) {
+            if !days.contains(where: { $0.date == day }) {
                 reload()
             }
         }

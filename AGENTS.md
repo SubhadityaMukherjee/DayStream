@@ -16,8 +16,8 @@ Always run `xcodegen generate` after creating/moving source files, and `./script
 
 - `project.yml` is the source of truth for the Xcode project; the `.xcodeproj` is generated and committed.
 - `Sources/Model/` — pure logic, no UI: `BlockTree` (outliner parser + todo toggling/syncing), `VaultStore` (vault I/O, watching, migration), `JournalDate` (filename formats), `CarryForward`, `WikiName`. Most logic is unit-tested in `Tests/`.
-- `Sources/Views/` — SwiftUI: `DailyStreamView` (LazyVStack of `DaySectionView`), `BlockRowView` (recursive block renderer), `CalendarView`, `PageView` (wikilink pages + linked references), `SettingsView`.
-- `Sources/Editor/MarkdownEditorView.swift` — AppKit `NSTextView` wrapper, content-fitting (non-scrolling), with outliner key bindings. Space-bar handling uses a local keyDown monitor because SwiftUI's ScrollView eats unmodified space.
+- `Sources/Views/` — SwiftUI: `DailyStreamView` (List of `DaySectionView`), `BlockRowView` (recursive block renderer), `CalendarView`, `PageView` (wikilink pages + linked references), `SettingsView`.
+- `Sources/Editor/MarkdownEditorView.swift` — AppKit `NSTextView` wrapper, content-fitting (caps at 560pt, scrolls internally), with outliner key bindings. Space-bar handling uses a local keyDown monitor because SwiftUI's ScrollView eats unmodified space. `[[` autocomplete is a non-activating NSPanel (`WikiSuggestController`) that must never take key focus.
 - `Sources/App/` — `DayStreamApp` (WindowGroup + MenuBarExtra + Settings), `AppModel` (selection/navigation state), `AppSettings` (UserDefaults-backed), `MenuBarPanel` (quick add + today's tasks).
 - `@Observable` everywhere; `VaultStore` mutates `days` in place to avoid full-list SwiftUI rebuilds (block IDs are `line-<index>` so unchanged rows keep identity across edits).
 
@@ -26,6 +26,8 @@ Always run `xcodegen generate` after creating/moving source files, and `./script
 - Files are the database: all writes go through `VaultStore.write` (atomic + in-place refresh). Watcher-triggered reloads are suppressed for ~0.8s after our own writes.
 - Todo syncing across notes must stay off the main thread (see `syncQueue` in `VaultStore`); the sync algorithm parses once and edits lines in place — never change line counts in `toggledFileText` output.
 - Journal filename formats: `yyyy-MM-dd.md` (new), `yyyy_MM_dd.md`, `dd-MM-yyyy.md` (legacy). New files always use ISO format. `migrateLegacyFilenames()` backs up to `backup/` before renaming.
+- macOS SwiftUI `ScrollView` + `LazyVStack` materializes rows lazily but never releases them — scrolling a large vault ballooned memory to ~1GB. The stream uses `List` (NSTableView-backed, recycles cells) instead; don't switch it back. Recycled cells mean `DaySectionView` must reset edit state when its `day` changes.
+- Journal filenames render in the **local** timezone (`allFilenames`), but parsing stays UTC — `startOfDay` instants are local midnight, whose UTC day differs in UTC+/- zones. Don't "simplify" either side.
 - UI strings are plain English; code comments explain *why*, not *what*. No comments unless necessary.
 - macOS 15+ deployment target; Swift 5, minimal strict concurrency.
 

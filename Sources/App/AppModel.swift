@@ -115,13 +115,20 @@ final class AppModel {
     /// recurring tasks and deadlines due that day, then reveals it.
     func createDayNote(for date: Date) {
         guard let store else { return }
-        store.ensureDayFile(for: date)
-        store.applyRecurringTasks(recurring.tasks, to: date)
-        store.applyDeadlines(deadlines.deadlines, to: date)
-        if !store.days.contains(where: { $0.date == date }) {
+        let day = JournalDate.startOfDay(date)
+        let isNewDate = !store.days.contains { $0.date == day }
+        store.ensureDayFile(for: day)
+        store.applyRecurringTasks(recurring.tasks, to: day)
+        store.applyDeadlines(deadlines.deadlines, to: day)
+        if !store.days.contains(where: { $0.date == day }) {
             store.reload()
         }
-        reveal(day: date)
+        // A brand-new date note starts with whatever was still unfinished
+        // before that day (duplicate-checked, so revisiting is a no-op).
+        if isNewDate, AppSettings.shared.carryForwardOnNewDate {
+            _ = store.carryForward(to: day)
+        }
+        reveal(day: day)
     }
 
     func reveal(day: Date) {

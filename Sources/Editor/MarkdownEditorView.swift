@@ -24,6 +24,9 @@ struct MarkdownEditorView: NSViewRepresentable {
     var onTextChanged: ((String) -> Void)? = nil
     var onCommit: (() -> Void)? = nil
     var onSaveCommit: (() -> Void)? = nil
+    /// Increment to move the caret to the end on the next update (used after
+    /// appending a task template, where preserving the old caret is wrong).
+    var caretAtEndRequest: Int = 0
 
     func makeNSView(context: Context) -> EditorScrollView {
         let tv = EditorTextView()
@@ -49,14 +52,21 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         let scroll = EditorScrollView()
         scroll.documentView = tv
-        scroll.hasVerticalScroller = false
+        // Overlay scroller: visible while scrolling, gone otherwise. Without
+        // a scroller, long notes had no way to see position/length.
+        scroll.hasVerticalScroller = true
+        scroll.scrollerStyle = .overlay
         scroll.hasHorizontalScroller = false
         scroll.drawsBackground = false
         scroll.editor = tv
 
         DispatchQueue.main.async {
             tv.window?.makeFirstResponder(tv)
-            tv.selectedRange = NSRange(location: (tv.string as NSString).length, length: 0)
+            let end = NSRange(location: (tv.string as NSString).length, length: 0)
+            tv.selectedRange = end
+            // Journal content grows at the bottom: land the view there too,
+            // not just the caret (the caret alone doesn't scroll the editor).
+            tv.scrollRangeToVisible(end)
         }
         return scroll
     }
@@ -70,8 +80,19 @@ struct MarkdownEditorView: NSViewRepresentable {
         guard let tv = nsView.editor else { return }
         let resolvedFont = font ?? AppSettings.shared.editorFont()
         if tv.string != text, !context.coordinator.isEditingLocally {
+            // External change (watcher, carry-forward, add-task). Replacing
+            // the whole string moves the caret to the end — restore it
+            // (clamped) so the cursor never jumps while reading or typing.
+            let sel = tv.selectedRange
             tv.string = text
             tv.highlight()
+            tv.selectedRange = NSRange(location: min(sel.location, (text as NSString).length), length: 0)
+        }
+        if context.coordinator.lastCaretAtEndRequest != caretAtEndRequest {
+            context.coordinator.lastCaretAtEndRequest = caretAtEndRequest
+            let end = NSRange(location: (text as NSString).length, length: 0)
+            tv.selectedRange = end
+            tv.scrollRangeToVisible(end)
         }
         if tv.font != resolvedFont {
             tv.font = resolvedFont
@@ -91,6 +112,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
         var isEditingLocally = false
+        var lastCaretAtEndRequest = 0
         private var spaceMonitor: Any?
         private weak var textView: EditorTextView?
 
@@ -142,6 +164,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 }
 
 /// Scroll view that sizes itself to fit the text view, so the outer stream scrolls.
+/// Tall notes cap at 560pt and scroll inside with the overlay scroller.
 final class EditorScrollView: NSScrollView {
     weak var editor: EditorTextView?
 
@@ -151,7 +174,7 @@ final class EditorScrollView: NSScrollView {
         }
         layout.ensureLayout(for: container)
         let height = layout.usedRect(for: container).height + tv.textContainerInset.height * 2 + 8
-        return NSSize(width: -1, height: max(height, 96))
+        return NSSize(width: -1, height: min(max(height, 96), 560))
     }
 }
 
@@ -229,6 +252,14 @@ final class EditorTextView: NSTextView {
     /// tap gestures, or the first responder drifts and typing breaks.
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    /// The suggestion panel is non-activating, so it can't dismiss itself
+    /// when focus moves elsewhere; close it here instead.
+    override func resignFirstResponder() -> Bool {
+        let ok = super.resignFirstResponder()
+        if ok { closeSuggestions() }
+        return ok
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -359,7 +390,7 @@ final class EditorTextView: NSTextView {
             }
             suggest = controller
         }
-        suggest!.items = Array(matches.prefix(6))
+        suggest!.items = Array(matches.prefix(50))
         suggest!.show(for: self, caretRect: caretRectForCaret(at: context.bracketStart))
     }
 
@@ -702,13 +733,24 @@ final class EditorTextView: NSTextView {
 
 // MARK: - Wikilink suggestion popover
 
-/// Transient NSPopover listing candidate page names above the caret.
-/// Keyboard navigation is owned by the text view (moveUp/moveDown/enter/tab),
-/// so the content view refuses first responder to keep typing uninterrupted.
+/// Autocomplete-style wikilink picker: a borderless, non-activating panel
+/// floating above the caret. It never becomes key, so typing never leaves
+/// the editor; ↑/↓ move the highlight and ⏎/⇥ complete (handled by the
+/// text view). A popover would take key focus on show, breaking typing.
 final class WikiSuggestController: NSObject {
-    private let popover = NSPopover()
+    private let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 0),
+                                styleMask: [.borderless, .nonactivatingPanel],
+                                backing: .buffered,
+                                defer: false)
     private let listView = SuggestListView()
-    private let hostView = NSView()
+    private let scrollView = SuggestScrollView()
+    private let background = NSVisualEffectView()
+    /// Width of the editor the panel anchors to; the list matches it so
+    /// full page names are readable instead of squeezed into a tiny box.
+    private var editorWidth: CGFloat = 320
+    private let edgeInset: CGFloat = 4
+
+    static let maxVisibleRows = 8
 
     var onPick: ((String) -> Void)?
 
@@ -728,7 +770,7 @@ final class WikiSuggestController: NSObject {
     }
 
     var isShown: Bool {
-        popover.isShown
+        panel.isVisible
     }
 
     override init() {
@@ -737,29 +779,49 @@ final class WikiSuggestController: NSObject {
             guard let self, self.items.indices.contains(index) else { return }
             self.onPick?(self.items[index])
         }
-        hostView.addSubview(listView)
-        popover.contentViewController = NSViewController()
-        popover.contentViewController?.view = hostView
-        popover.behavior = .transient
-        popover.hasFullSizeContent = true
+        scrollView.documentView = listView
+        scrollView.hasVerticalScroller = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.verticalScrollElasticity = .none
+
+        background.material = .popover
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 8
+        background.layer?.masksToBounds = true
+        background.addSubview(scrollView)
+
+        panel.contentView = background
+        panel.isFloatingPanel = true
+        panel.hasShadow = true
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.level = .floating
+        panel.hidesOnDeactivate = true
+        panel.ignoresMouseEvents = false
     }
 
     func show(for textView: NSView, caretRect: CGRect) {
         guard !items.isEmpty else { return }
+        editorWidth = max(textView.bounds.width, 160)
         listView.selected = selected
         syncSize()
-        if !popover.isShown {
-            // Slight vertical inset so the popover's arrow sits over the caret.
-            let anchor = caretRect.insetBy(dx: 0, dy: 0).offsetBy(dx: 0, dy: -1)
-            popover.show(relativeTo: anchor, of: textView, preferredEdge: .minY)
+        position(above: caretRect.offsetBy(dx: 0, dy: -1), in: textView)
+        if !panel.isVisible {
+            panel.orderFront(nil)
         }
     }
 
     func close() {
-        if popover.isShown {
-            popover.performClose(nil)
+        if panel.isVisible {
+            panel.orderOut(nil)
         }
         selected = 0
+        scrollView.contentView.scroll(to: .zero)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     func moveSelection(_ delta: Int) {
@@ -767,19 +829,71 @@ final class WikiSuggestController: NSObject {
         selected = (selected + delta + items.count) % items.count
         listView.selected = selected
         listView.needsDisplay = true
+        let row = CGRect(x: 0,
+                         y: CGFloat(selected) * SuggestListView.rowHeight,
+                         width: listView.bounds.width,
+                         height: SuggestListView.rowHeight)
+        listView.scrollToVisible(row)
+    }
+
+    /// Screen-space placement: bottom edge just above the caret, centered
+    /// on it, clamped to the screen. Falls below the caret when there is no
+    /// room above. Re-runs on every show (each keystroke) so the panel
+    /// tracks the caret.
+    private func position(above caretRect: CGRect, in textView: NSView) {
+        guard let window = textView.window else { return }
+        let windowRect = textView.convert(caretRect, to: nil)
+        let screenRect = window.convertToScreen(windowRect)
+        let size = panel.frame.size
+        var origin = CGPoint(x: screenRect.midX - size.width / 2,
+                             y: screenRect.maxY + 6)
+        if let screen = window.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            origin.x = max(visible.minX, min(origin.x, visible.maxX - size.width))
+            if origin.y + size.height > visible.maxY {
+                origin.y = screenRect.minY - size.height - 6
+            }
+            origin.y = max(visible.minY, origin.y)
+        }
+        panel.setFrameOrigin(origin)
     }
 
     private func syncSize() {
-        let size = listView.intrinsicContentSize
-        hostView.frame = NSRect(origin: .zero, size: size)
-        listView.frame = hostView.frame
-        popover.contentSize = size
+        let width = min(max(editorWidth, 260), 720)
+        let rows = max(items.count, 1)
+        let visibleRows = min(rows, Self.maxVisibleRows)
+        let size = NSSize(width: width,
+                          height: CGFloat(visibleRows) * SuggestListView.rowHeight + edgeInset * 2)
+        background.frame = NSRect(origin: .zero, size: size)
+        scrollView.frame = background.bounds.insetBy(dx: edgeInset, dy: edgeInset)
+        listView.frame = NSRect(origin: .zero,
+                                size: NSSize(width: width - edgeInset * 2,
+                                             height: CGFloat(rows) * SuggestListView.rowHeight))
+        panel.setContentSize(size)
     }
 }
 
+/// Scroll view that consumes every scroll event itself, including
+/// out-of-range ones at the edges: NSScrollView otherwise forwards them up
+/// the responder chain, and they escape the non-activating panel into the
+/// editor's window, where the stray event nudges the caret.
+final class SuggestScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard let doc = documentView else { return }
+        let maxY = max(0, doc.bounds.height - contentView.bounds.height)
+        let y = max(0, min(contentView.bounds.origin.y - event.scrollingDeltaY, maxY))
+        contentView.scroll(to: NSPoint(x: 0, y: y))
+        reflectScrolledClipView(contentView)
+    }
+
+    override func swipe(with event: NSEvent) {}
+}
+
 /// Self-drawing suggestion rows; keeps the popover lightweight and keeps
-/// keyboard focus with the editor.
+/// keyboard focus with the editor. Rows are centered; long names truncate.
 final class SuggestListView: NSView {
+    static let rowHeight: CGFloat = 24
+
     var items: [String] = [] {
         didSet { needsDisplay = true }
     }
@@ -788,15 +902,17 @@ final class SuggestListView: NSView {
     }
     var onPick: ((Int) -> Void)?
 
-    private let rowHeight: CGFloat = 24
     private var font = NSFont.systemFont(ofSize: 12.5)
 
     override var acceptsFirstResponder: Bool { false }
+    override var isFlipped: Bool { true }
 
     override func draw(_ dirtyRect: NSRect) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .center
+        paragraph.lineBreakMode = .byTruncatingTail
         for (i, item) in items.enumerated() {
-            let y = bounds.height - CGFloat(i + 1) * rowHeight
-            let row = CGRect(x: 0, y: y, width: bounds.width, height: rowHeight)
+            let row = CGRect(x: 0, y: CGFloat(i) * Self.rowHeight, width: bounds.width, height: Self.rowHeight)
             let isSelected = i == selected
             if isSelected {
                 NSColor.controlAccentColor.setFill()
@@ -805,6 +921,7 @@ final class SuggestListView: NSView {
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: isSelected ? NSColor.white : NSColor.labelColor,
+                .paragraphStyle: paragraph,
             ]
             (item as NSString).draw(in: row.insetBy(dx: 9, dy: 0), withAttributes: attrs)
         }
@@ -812,15 +929,9 @@ final class SuggestListView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        let index = Int((bounds.height - p.y) / rowHeight)
+        let index = Int(p.y / Self.rowHeight)
         if items.indices.contains(index) {
             onPick?(index)
         }
-    }
-
-    override var intrinsicContentSize: NSSize {
-        let widths = items.map { ($0 as NSString).size(withAttributes: [.font: font]).width }
-        let width = min(max((widths.max() ?? 0) + 20, 140), 340)
-        return NSSize(width: width, height: CGFloat(max(items.count, 1)) * rowHeight)
     }
 }
