@@ -30,9 +30,9 @@ Canonical format is ISO `yyyy-MM-dd.md`. `VaultStore.migrateLegacyFilenames()` c
 
 `develop` = active work, `main` = stable + `vX.Y.Z` tags. Tagged builds produce `DayStream-macOS.zip` GitHub Releases; `main` pushes deploy the GitHub Pages site from `docs/index.html`.
 
-## Menu bar panel
+## Global quick add (no menu bar applet)
 
-`MenuBarExtra` with `.window` style — a real popover window with a TextField (menu style doesn't support text input). Quick-add appends `- TODO <text>` to today's canonical file via `ensureTodayFile()` so it never duplicates existing files.
+The system-wide shortcut (Carbon `RegisterEventHotKey`, ⌥T by default, Settings → Shortcuts) opens (or brings forward) the main window and runs `AppModel.newTodoToday()` — identical to ⌘N inside the app. `RootView` captures its scene's `OpenWindowAction` into `MainWindowOpener` so the hotkey can reopen a closed window from outside the view hierarchy. A menu bar applet (NSStatusItem + NSPopover) existed until v1.3.x and was removed: the main window path made it redundant.
 
 ## Task timestamps (`added::` / `completed::`)
 

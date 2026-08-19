@@ -6,7 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Single window, no tabs: never auto-tab our windows, and there is
         // no document model that would justify more than one.
         NSWindow.allowsAutomaticWindowTabbing = false
-        MenuBarController.shared.setup()
+        GlobalQuickAddController.shared.refresh()
     }
 }
 
@@ -18,8 +18,8 @@ struct DayStreamApp: App {
 
     var body: some Scene {
         // `Window` (not WindowGroup): a single main window. Re-opening
-        // (dock click, menu bar applet, openWindow) reactivates the
-        // existing window instead of spawning another.
+        // (dock click, global quick-add shortcut, openWindow) reactivates
+        // the existing window instead of spawning another.
         Window("DayStream", id: "main") {
             RootView()
                 .environment(appModel)
@@ -52,6 +52,7 @@ struct DayStreamApp: App {
 struct RootView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
+    @Environment(\.openWindow) private var openWindow
     /// Captured at launch. Once the welcome has run (or was seen in a past
     /// launch) it never re-presents mid-session; Settings → Advanced only
     /// flags it for the *next* launch.
@@ -70,6 +71,9 @@ struct RootView: View {
             }
         }
         .frame(minWidth: 980, minHeight: 640)
+        .onAppear {
+            MainWindowOpener.openWindow = openWindow
+        }
         .sheet(isPresented: Binding(
             get: { !settings.hasSeenWelcome && !welcomeDoneThisSession },
             set: { shown in

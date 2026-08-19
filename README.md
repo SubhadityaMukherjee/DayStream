@@ -15,8 +15,7 @@ Author: **Subhaditya Mukherjee**
 - **Carry forward** — one click copies all unfinished tasks from previous days into today's note, preserving structure.
 - **[[Wikilinks]] & pages** — typing `[[` suggests existing page names; pages open as a rendered view with Logseq-style Linked References; date-shaped links (`[[Aug 18th, 2026]]`) jump to that day.
 - **Search** — ⌘F opens the search bar with the caret ready; one bar across every journal and page, hits jump to their day or page, Esc closes.
-- **Keyboard-first** — ⌘N appends a fresh todo to today and drops the caret in it; ⌘F finds; a system-wide shortcut (⌥T by default, recordable in Settings → Shortcuts) opens the menu bar applet from any app.
-- **Menu bar applet** — quick-add a task for today or schedule it to any date, and toggle today's open tasks without leaving what you're doing.
+- **Keyboard-first** — ⌘N appends a fresh todo to today and drops the caret in it; ⌘F finds; a system-wide shortcut (⌥T by default, recordable in Settings → Shortcuts) opens DayStream from any app with a new todo ready to type.
 - **Git backup** — commit and push the vault to its git remote in one click (Settings → Advanced), or automatically on a daily/weekly schedule (off by default, weekly suggested).
 - **Image & file drops** — dropped images are copied into `assets/` and embedded with relative markdown links.
 - **Live on disk** — external edits are picked up via file watching; the vault is safe to use from other tools at the same time.
@@ -86,7 +85,7 @@ What the pieces do: `TODO`/`DONE` markers render with checkboxes; `added::` / `c
 
 ```
 Sources/
-  App/        App entry point, app model, settings, menu bar panel, setup
+  App/        App entry point, app model, settings, global quick add, setup
   Model/      Vault store, block tree parser, journal dates, carry-forward, wiki names
   Views/      Stream, day sections, block rows, calendar, pages, settings
   Editor/     AppKit-based markdown editor with outliner behaviors
