@@ -51,7 +51,7 @@ Recognized journal filename formats: `yyyy-MM-dd.md` (current convention, used f
 
 ## Documentation
 
-- Full usage guide & FAQ (GitHub Pages): https://subhadityamukherjee.github.io/daily_stream/
+- Full usage guide & FAQ (GitHub Pages): https://subhadityamukherjee.github.io/DayStream/
 - This README renders on the repo home page.
 
 ## Branching & releases

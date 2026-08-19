@@ -13,7 +13,29 @@ struct MarkdownText: View {
             .foregroundStyle(color)
     }
 
+    /// Parsing markdown per body evaluation made scrolling janky — every
+    /// visible row re-parsed on every frame of the stream's lazy stack.
+    /// AttributedString is a value type, so the cache stores a box.
+    private static let cache: NSCache<NSString, AttributedBox> = {
+        let c = NSCache<NSString, AttributedBox>()
+        c.totalCostLimit = 8192
+        return c
+    }()
+
+    private final class AttributedBox {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
     private var attributed: AttributedString {
+        let key = "\(strikethrough ? "s" : "p")‖\(content)" as NSString
+        if let boxed = Self.cache.object(forKey: key) { return boxed.value }
+        let value = buildAttributed()
+        Self.cache.setObject(AttributedBox(value), forKey: key, cost: 1)
+        return value
+    }
+
+    private func buildAttributed() -> AttributedString {
         var result = AttributedString()
         let parts = splitWikilinks(content)
         for part in parts {
@@ -29,10 +51,7 @@ struct MarkdownText: View {
                 // Date-like wikilinks ([[Aug 18th, 2026]], [[2026-08-18]]) jump
                 // to that day in the stream; everything else opens the page.
                 if let day = WikiDate.parse(name) {
-                    let f = DateFormatter()
-                    f.locale = Locale(identifier: "en_US_POSIX")
-                    f.dateFormat = "yyyy-MM-dd"
-                    link.link = URL(string: "daystream://date?value=" + f.string(from: day))
+                    link.link = URL(string: "daystream://date?value=" + Self.isoDayFormatter.string(from: day))
                 } else {
                     link.link = URL(string: "daystream://page?name=" + encodeName(name))
                 }
@@ -46,6 +65,13 @@ struct MarkdownText: View {
         }
         return result
     }
+
+    private static let isoDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     private func encodeName(_ name: String) -> String {
         name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
