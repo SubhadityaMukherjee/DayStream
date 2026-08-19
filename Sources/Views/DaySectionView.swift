@@ -33,6 +33,10 @@ struct DaySectionView: View {
         .overlay(alignment: .bottom) {
             Divider().opacity(0.5)
         }
+        // One container per day so the header card and the badges inside its
+        // blocks batch into a single glass render pass — without this each
+        // badge pays for its own effect and scrolling stutters.
+        .glassContainer(spacing: 0)
         .onDisappear {
             flushSave()
         }

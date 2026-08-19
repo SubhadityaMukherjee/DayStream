@@ -8,9 +8,11 @@ on:
     branches: [main, develop]
 
 jobs:
+  # Liquid Glass APIs (glassEffect et al.) need the macOS 26 SDK, which only
+  # ships in Xcode 26 — available on the macos-26 runner image, not macos-15.
   test:
     name: Build & Test (macOS)
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
@@ -63,7 +65,7 @@ jobs:
     name: Release app bundle
     if: startsWith(github.ref, 'refs/tags/v')
     needs: test
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: write
     steps:
@@ -108,7 +110,7 @@ jobs:
     name: GitHub Pages
     if: github.ref == 'refs/heads/main'
     needs: test
-    runs-on: macos-15
+    runs-on: macos-26
     permissions:
       contents: read
       pages: write

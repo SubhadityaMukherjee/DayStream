@@ -158,11 +158,15 @@ struct BlockRowView: View {
               let a = NoteFormatter.parseTimestamp(added),
               let c = NoteFormatter.parseTimestamp(completed)
         else { return nil }
+        return "Added \(Self.helpDateFormatter.string(from: a)) · Completed \(Self.helpDateFormatter.string(from: c))"
+    }
+
+    private static let helpDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short
-        return "Added \(f.string(from: a)) · Completed \(f.string(from: c))"
-    }
+        return f
+    }()
 
     private func propertyValue(_ key: String) -> String? {
         block.properties.first { $0.key.lowercased() == key }?.value

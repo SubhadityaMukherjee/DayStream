@@ -352,17 +352,20 @@ struct FloatingSearchView: View {
         }
     }
 
+    /// Plain style + circular glass: the .glass button style renders a
+    /// rounded rect, so the shape is drawn by hand for a true circle.
     private var toggleButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
         } label: {
             Image(systemName: expanded ? "xmark" : "magnifyingglass")
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 15, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 38, height: 38)
+                .frame(width: 40, height: 40)
                 .contentShape(.rect)
         }
-        .glassButtonStyle()
+        .buttonStyle(.plain)
+        .floatingPanelBackground(in: Circle())
         .keyboardShortcut("f", modifiers: .command)
         .help("Search all notes and pages (⌘F)")
     }
