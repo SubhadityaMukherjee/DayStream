@@ -42,10 +42,16 @@ enum JournalDate {
 
     /// Today's filename in every supported format, newest convention first
     /// (`yyyy-MM-dd.md`, `yyyy_MM_dd.md`, `dd-MM-yyyy.md`).
+    ///
+    /// Rendered in the *local* timezone: callers pass local-day instants
+    /// (often `startOfDay`, i.e. local midnight — whose UTC day is the
+    /// previous day in UTC+ zones), and the name must match the calendar
+    /// day the user means. Parsing (`date(fromFilename:)`) stays UTC-based
+    /// so file names always round-trip to the same day key.
     static func allFilenames(for date: Date) -> [String] {
         let df = DateFormatter()
         df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone(identifier: "UTC")
+        df.timeZone = TimeZone.current
         var out: [String] = []
         for format in ["yyyy-MM-dd", "yyyy_MM_dd", "dd-MM-yyyy"] {
             df.dateFormat = format

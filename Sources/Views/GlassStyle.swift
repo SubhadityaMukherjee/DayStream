@@ -18,6 +18,27 @@ extension Color {
     static var readableLink: Color { Color(nsColor: .readableLink) }
 }
 
+/// Compact circular icon button for per-day row actions (add task, edit).
+/// A subtle opaque circle so the control stays visible over the day
+/// header's glass card, unlike bordered buttons which render square.
+struct RoundIconButtonStyle: ButtonStyle {
+    var tint: Color = .secondary
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(configuration.isPressed ? tint.opacity(0.5) : tint)
+            .frame(width: 24, height: 24)
+            .background(Circle().fill(Color.primary.opacity(configuration.isPressed ? 0.16 : 0.08)))
+            .contentShape(.rect)
+    }
+}
+
+extension ButtonStyle where Self == RoundIconButtonStyle {
+    static var roundIcon: RoundIconButtonStyle { RoundIconButtonStyle() }
+    static func roundIcon(_ tint: Color) -> RoundIconButtonStyle { RoundIconButtonStyle(tint: tint) }
+}
+
 /// Liquid Glass adoption with graceful fallbacks: the app targets macOS 15,
 /// so every glass API (new in macOS 26) is availability-gated and older
 /// systems keep the nearest material equivalent.

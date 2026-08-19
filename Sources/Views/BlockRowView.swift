@@ -39,7 +39,10 @@ struct BlockRowView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(.vertical, 1)
+        // A [[wikilink]] row heads the sublist under it — extra space above
+        // separates it from the previous group so sections read clearly.
+        .padding(.top, isWikilinkHeader ? 9 : 1)
+        .padding(.bottom, 1)
 
         ForEach(block.children) { child in
             BlockRowView(block: child, file: file, store: store, onToggle: onToggle)
@@ -54,10 +57,10 @@ struct BlockRowView: View {
         }
     }
 
-    /// `added::` / `completed::` are internal bookkeeping for durations;
-    /// everything else shows as a badge.
+    /// `added::` / `completed::` are internal bookkeeping for durations,
+    /// `id::` is a Logseq-generated identifier — none are user content.
     private var hiddenPropertyKeys: Set<String> {
-        ["added", "completed"]
+        ["added", "completed", "id"]
     }
 
     /// Outliner-style vertical guide rails, one per ancestor indent level.
@@ -81,6 +84,10 @@ struct BlockRowView: View {
 
     private var headingLevel: Int {
         block.content.prefix(while: { $0 == "#" }).count
+    }
+
+    private var isWikilinkHeader: Bool {
+        block.content.trimmingCharacters(in: .whitespaces).hasPrefix("[[")
     }
 
     @ViewBuilder

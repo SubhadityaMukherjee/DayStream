@@ -13,6 +13,7 @@ final class AppSettings {
         static let fontSize = "daystream.fontSize"
         static let syncTodos = "daystream.syncTodosAcrossNotes"
         static let autoCarry = "daystream.autoCarryForward"
+    static let carryOnNewDate = "daystream.carryForwardOnNewDate"
         static let welcome = "daystream.hasSeenWelcome"
         static let gitBackupPath = "daystream.gitBackupPath"
         static let gitBackupEnabled = "daystream.gitBackupEnabled"
@@ -34,6 +35,11 @@ final class AppSettings {
     var autoCarryForward: Bool {
         didSet { UserDefaults.standard.set(autoCarryForward, forKey: Keys.autoCarry) }
     }
+    /// Creating a note for a date that doesn't exist yet carries unfinished
+    /// tasks from earlier days into it (calendar, deadline, [[date link]]).
+    var carryForwardOnNewDate: Bool {
+        didSet { UserDefaults.standard.set(carryForwardOnNewDate, forKey: Keys.carryOnNewDate) }
+    }
     /// One-time welcome window has been shown.
     var hasSeenWelcome: Bool {
         didSet { UserDefaults.standard.set(hasSeenWelcome, forKey: Keys.welcome) }
@@ -53,6 +59,7 @@ final class AppSettings {
         self.fontSize = d.object(forKey: Keys.fontSize) as? Double ?? 15
         self.syncTodosAcrossNotes = d.object(forKey: Keys.syncTodos) as? Bool ?? true
         self.autoCarryForward = d.object(forKey: Keys.autoCarry) as? Bool ?? true
+        self.carryForwardOnNewDate = d.object(forKey: Keys.carryOnNewDate) as? Bool ?? true
         self.hasSeenWelcome = d.bool(forKey: Keys.welcome)
         self.gitBackupPath = d.string(forKey: Keys.gitBackupPath) ?? ""
         self.gitBackupEnabled = d.bool(forKey: Keys.gitBackupEnabled)
