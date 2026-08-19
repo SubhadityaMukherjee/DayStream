@@ -1,6 +1,34 @@
 import XCTest
 @testable import DayStream
 
+final class HotkeySpecTests: XCTestCase {
+    func testStorageRoundTrip() {
+        let spec = AppSettings.HotkeySpec(carbonModifiers: 4352, keyCode: 17, display: "⌃⌥T")
+        XCTAssertEqual(AppSettings.HotkeySpec.parse(spec.storage), spec)
+    }
+
+    func testDefaultQuickAddIsOptionT() {
+        let spec = AppSettings.HotkeySpec.defaultQuickAdd
+        XCTAssertEqual(spec.carbonModifiers, 2048, "optionKey = 1 << 11")
+        XCTAssertEqual(spec.keyCode, 17, "kVK_ANSI_T = 0x11")
+        XCTAssertEqual(spec.display, "⌥T")
+    }
+
+    func testParseRejectsGarbage() {
+        XCTAssertNil(AppSettings.HotkeySpec.parse(""))
+        XCTAssertNil(AppSettings.HotkeySpec.parse("2048"))
+        XCTAssertNil(AppSettings.HotkeySpec.parse("a,b,c"))
+        XCTAssertNil(AppSettings.HotkeySpec.parse("2048,17,"))
+    }
+
+    func testDisplayString() {
+        // ⌥ + T (kVK_ANSI_T = 17, optionKey = 2048)
+        XCTAssertEqual(GlobalHotkeyManager.displayString(keyCode: 17, carbonModifiers: 2048), "⌥T")
+        // ⌘⇧ + S (cmdKey 256 | shiftKey 512 = 768; kVK_ANSI_S = 1)
+        XCTAssertEqual(GlobalHotkeyManager.displayString(keyCode: 1, carbonModifiers: 768), "⇧⌘S")
+    }
+}
+
 final class CodeBlockTests: XCTestCase {
     // MARK: - BlockTree.bodySegments
 

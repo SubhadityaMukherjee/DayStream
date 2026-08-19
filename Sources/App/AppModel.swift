@@ -3,6 +3,7 @@ import Observation
 
 @Observable
 final class AppModel {
+    static let shared = AppModel()
     static let vaultPathKey = "daystream.vaultPath"
 
     var store: VaultStore?
@@ -12,12 +13,17 @@ final class AppModel {
     var openPage: PageRef?
     var carrySummary: CarryResult?
     var carryButtonPulse = false
+    /// Incremented by ⌘N / menu → today's DaySectionView appends a "- TODO "
+    /// and opens the editor with the caret ready.
+    var newTodoRequest = 0
+    /// Incremented by ⌘F / menu → FloatingSearchView opens and focuses its field.
+    var searchRequest = 0
 
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
 
     enum SettingsTab: Int {
-        case general = 0, fonts = 1, recurring = 2, advanced = 3
+        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4
     }
 
     /// Set alongside `openSettings()` to land on a specific tab; SettingsView
@@ -34,6 +40,9 @@ final class AppModel {
     }
 
     var pendingReveal: PendingReveal?
+    /// Set when ⌘N fires while a page sheet is open: the queued reveal runs
+    /// on dismiss, then this triggers the new-todo append.
+    var pendingNewTodo = false
 
     func queueReveal(day: Date, createIfMissing: Bool) {
         pendingReveal = PendingReveal(day: day, createIfMissing: createIfMissing)
@@ -41,13 +50,38 @@ final class AppModel {
 
     /// Runs the queued reveal (if any) — call from a sheet's onDismiss.
     func consumePendingReveal() {
-        guard let pending = pendingReveal else { return }
-        pendingReveal = nil
-        if pending.createIfMissing {
-            createDayNote(for: pending.day)
-        } else {
-            reveal(day: pending.day)
+        let pendingNew = pendingNewTodo
+        if let pending = pendingReveal {
+            pendingReveal = nil
+            if pending.createIfMissing {
+                createDayNote(for: pending.day)
+            } else {
+                reveal(day: pending.day)
+            }
         }
+        if pendingNew {
+            pendingNewTodo = false
+            newTodoRequest += 1
+        }
+    }
+
+    /// ⌘N / menu: reveal today (creating the note) and ask today's section
+    /// to append a fresh `- TODO ` with the caret ready.
+    func newTodoToday() {
+        guard isConfigured else { return }
+        if openPage != nil {
+            openPage = nil
+            pendingNewTodo = true
+            queueReveal(day: JournalDate.startOfDay(Date()), createIfMissing: true)
+            return
+        }
+        goToToday()
+        newTodoRequest += 1
+    }
+
+    /// ⌘F / menu: open the search panel with the caret in its field.
+    func triggerSearch() {
+        searchRequest += 1
     }
 
     struct PageRef: Identifiable {
@@ -59,6 +93,7 @@ final class AppModel {
 
     private var lastAppliedDay: Date?
     private var dayTickTimer: Timer?
+    private var backupTimer: Timer?
 
     init() {
         if let path = UserDefaults.standard.string(forKey: Self.vaultPathKey) {
@@ -68,6 +103,7 @@ final class AppModel {
             }
         }
         startDayTimer()
+        startBackupTimer()
     }
 
     func setupVault(at url: URL) {
@@ -165,10 +201,11 @@ final class AppModel {
     var gitBackupResult: GitBackup.Result?
     var isGitBackingUp = false
 
-    func runGitBackup() {
+    func runGitBackup(automatic: Bool = false) {
         guard !isGitBackingUp else { return }
         let path = AppSettings.shared.gitBackupPath
         guard !path.isEmpty, GitBackup.isGitRepo(URL(fileURLWithPath: path)) else {
+            guard !automatic else { return }
             gitBackupResult = GitBackup.Result(
                 success: false,
                 message: "No usable git repository configured. Pick one in Settings → Advanced.")
@@ -176,13 +213,40 @@ final class AppModel {
         }
         let repo = URL(fileURLWithPath: path)
         isGitBackingUp = true
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        DispatchQueue.global(qos: automatic ? .utility : .userInitiated).async { [weak self] in
             let result = GitBackup.backup(repo: repo)
             DispatchQueue.main.async {
-                self?.gitBackupResult = result
-                self?.isGitBackingUp = false
+                guard let self else { return }
+                self.isGitBackingUp = false
+                if result.success {
+                    AppSettings.shared.lastAutoBackup = Date()
+                    // Automatic runs stay silent unless they fail.
+                    if !automatic {
+                        self.gitBackupResult = result
+                    }
+                } else {
+                    self.gitBackupResult = result
+                }
             }
         }
+    }
+
+    /// True when the configured interval has elapsed (or no backup has ever
+    /// run) and backup is enabled with a valid repository.
+    func autoBackupDue(now: Date = Date()) -> Bool {
+        let settings = AppSettings.shared
+        guard settings.gitBackupEnabled,
+              settings.autoBackupEnabled,
+              !settings.gitBackupPath.isEmpty,
+              GitBackup.isGitRepo(URL(fileURLWithPath: settings.gitBackupPath))
+        else { return false }
+        guard let last = settings.lastAutoBackup else { return true }
+        return now.timeIntervalSince(last) >= settings.autoBackupInterval.seconds
+    }
+
+    func runAutoBackupIfDue() {
+        guard autoBackupDue() else { return }
+        runGitBackup(automatic: true)
     }
 
     /// True when the sidebar backup button should be shown.
@@ -219,6 +283,20 @@ final class AppModel {
             guard today != self.lastAppliedDay else { return }
             self.store?.reload()
             self.applyScheduledForToday()
+        }
+    }
+
+    /// Hourly auto-backup check: runs the git backup when the chosen
+    /// interval (daily/weekly) has elapsed. Off unless configured, so the
+    /// timer itself is harmless when backup is disabled.
+    private func startBackupTimer() {
+        backupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            self?.runAutoBackupIfDue()
+        }
+        // A due backup also runs shortly after launch, not just on the next
+        // hourly tick.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.runAutoBackupIfDue()
         }
     }
 }

@@ -1,16 +1,18 @@
 import SwiftUI
 import AppKit
 
-/// Menu bar applet (window style): quick-add a task to today's journal (or
-/// schedule it for a picked date) and see/toggle today's open todos without
-/// opening the main window.
+/// Menu bar applet (hosted in MenuBarController's popover): quick-add a
+/// task to today's journal (or schedule it for a picked date) and see/toggle
+/// today's open todos without opening the main window.
 struct MenuBarPanel: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
+    @Environment(MenuBarFocusModel.self) private var menuBarFocus
     @Environment(\.openWindow) private var openWindow
     @State private var quickAdd = ""
     @State private var scheduling = false
     @State private var scheduledDate = JournalDate.startOfDay(Date())
+    @FocusState private var quickAddFocused: Bool
 
     var body: some View {
         Group {
@@ -30,6 +32,10 @@ struct MenuBarPanel: View {
                 .padding()
                 .frame(width: 300)
             }
+        }
+        .onAppear { quickAddFocused = true }
+        .onChange(of: menuBarFocus.quickAddToken) { _, _ in
+            quickAddFocused = true
         }
     }
 
@@ -66,6 +72,7 @@ struct MenuBarPanel: View {
                     .foregroundStyle(.secondary)
                 TextField("Quick add a task for today…", text: $quickAdd)
                     .font(.system(size: 13))
+                    .focused($quickAddFocused)
                     .onSubmit(submitQuickAdd)
                 if !quickAdd.isEmpty {
                     Button(action: submitQuickAdd) {
