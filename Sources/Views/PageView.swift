@@ -175,17 +175,15 @@ struct PageView: View {
     }
 
     private func exitEditing() {
+        // Quitting the editor auto-formats, same as ⌘S.
+        text = NoteFormatter.normalizedForSave(text, isToday: false, now: Date())
         save()
         isEditing = false
     }
 
-    /// ⌘S: normalize (drop empty bullets, space wikilink groups), save, and
-    /// return to the rendered view.
     private func saveAndQuit() {
         saveTask?.cancel()
-        text = NoteFormatter.normalizedForSave(text, isToday: false, now: Date())
-        save()
-        isEditing = false
+        exitEditing()
     }
 
     private var pageTextIsEmpty: Bool? {

@@ -1,5 +1,29 @@
 import SwiftUI
 
+/// A fenced code block in the stream/pages: monospaced, whitespace-preserving,
+/// selectable. Language from the info string (```swift) shows as a caption.
+struct CodeBlockView: View {
+    @Environment(AppSettings.self) private var settings
+    let language: String?
+    let code: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if let language, !language.isEmpty {
+                Text(language)
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            Text(code.isEmpty ? " " : code)
+                .font(.system(size: max(10, settings.fontSize - 1), design: .monospaced))
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(10)
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 /// Renders one line of markdown content: `**bold**`, `*italic*`, `` `code` ``,
 /// `[links](url)`, and Logseq `[[wikilinks]]` (intercepted via a custom URL
 /// scheme and routed through the environment's openURL action).

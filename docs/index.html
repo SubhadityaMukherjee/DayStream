@@ -104,7 +104,9 @@
     <div class="card"><h3>Task timing</h3><p>New tasks record when they were added; finished tasks show how long they took, right next to them.</p></div>
     <div class="card"><h3>Recurring &amp; deadlines</h3><p>Daily / weekly / one-off tasks seed themselves on top of the day's note. Deadlines stay pinned in the sidebar.</p></div>
     <div class="card"><h3>[[Wikilinks]] &amp; pages</h3><p>Click a link to open a rendered page with Logseq-style linked references. Date links jump to that day.</p></div>
-    <div class="card"><h3>Search everything</h3><p>One search bar across every journal and page; results jump straight to the day or page.</p></div>
+    <div class="card"><h3>Search &amp; shortcuts</h3><p>⌘F finds across every note with the caret ready; ⌘N starts a todo for today. Plus a recordable system-wide quick-add shortcut.</p></div>
+    <div class="card"><h3>Code blocks</h3><p>Fenced <code>```</code> blocks render as monospaced cards and survive auto-formatting byte-for-byte.</p></div>
+    <div class="card"><h3>Git backup</h3><p>Commit and push the vault to its git remote in one click — or automatically, daily or weekly.</p></div>
     <div class="card"><h3>Menu bar quick add</h3><p>Capture a task for today — or schedule it to any date — without switching apps.</p></div>
     <div class="card"><h3>Native &amp; fast</h3><p>SwiftUI + AppKit on macOS 15+. No Electron, no cloud account, no database.</p></div>
   </div>
@@ -145,8 +147,9 @@
     <li><span class="kbd">Enter</span> continues the current bullet; on an empty bullet it exits the list.</li>
     <li><span class="kbd">Tab</span> / <span class="kbd">⇧Tab</span> indent / outdent lines.</li>
     <li>Slash commands expand as you type: <code>/todo</code>, <code>/doing</code>, <code>/later</code>, <code>/now</code>, <code>/done</code>.</li>
+    <li>Fenced code blocks (<code>```</code> or <code>~~~</code>) get monospace highlighting in the editor and render as cards in the stream, with the language label from the info string.</li>
     <li>Dropped images are copied into <code>assets/</code> and embedded; dropped files and web links become markdown links.</li>
-    <li><span class="kbd">⌘S</span> saves <em>and</em> closes the editor, tidying as it goes: empty <code>-</code> lines are removed and top-level <code>[[wikilink]]</code> groups are separated by a blank line.</li>
+    <li>Saving — <span class="kbd">⌘S</span> or closing the editor — <em>auto-formats</em> the note: consistent tabs and <code>-</code> bullets, collapsed blank-line runs, a blank line kept between different block kinds (text, lists, <code>[[wikilink]]</code> groups, code fences). Code fence content is never touched.</li>
   </ul>
 
   <h3 class="sub" id="tasks">3. Tasks, timing &amp; syncing</h3>
@@ -173,22 +176,27 @@
   </ul>
 
   <h3 class="sub" id="menubar">6. Menu bar &amp; quick capture</h3>
-  <p>The menu bar icon opens a compact panel: quick-add a task for today, or toggle the calendar button to schedule it for any date. Below, today's open tasks are listed and toggleable without opening the main window.</p>
+  <p>The menu bar icon opens a compact panel: quick-add a task for today, or toggle the calendar button to schedule it for any date. Below, today's open tasks are listed and toggleable without opening the main window. A system-wide shortcut — <span class="kbd">⌥T</span> by default, recordable in <strong>Settings → Shortcuts</strong> — opens the panel with the caret on the task field from any app. DayStream keeps a single window with no tabs; opening it again just brings the existing one forward.</p>
 
   <h3 class="sub" id="settings">7. Settings &amp; maintenance</h3>
   <ul>
     <li><strong>General:</strong> vault location, cross-note task syncing, automatic daily carry-forward, and maintenance — delete empty notes, migrate legacy filenames.</li>
     <li><strong>Fonts:</strong typeface (system / serif / rounded / monospace) and size for stream, headings and editor.</li>
     <li><strong>Recurring:</strong> add and remove recurring tasks and inspect their schedules.</li>
-    <li><strong>Advanced:</strong> git backup — enable it, and a one-click <em>Back Up Vault</em> button appears in the sidebar. It commits the whole vault with a fixed message and pushes it to your GitHub remote (requires git; credentials must already be configured).</li>
+    <li><strong>Shortcuts:</strong> the full shortcut reference, plus the configurable global quick-add shortcut (record any combo with ⌘/⌥/⌃).</li>
+    <li><strong>Advanced:</strong> git backup — enable it, and a one-click <em>Back Up Vault</em> button appears in the sidebar. It commits the whole vault with a fixed message and pushes it to your GitHub remote (requires git; credentials must already be configured). <em>Back up automatically</em> repeats this daily or weekly (weekly is the default; it is off until you turn it on).</li>
   </ul>
   <p>Filename migration renames <code>2026_08_18.md</code> / <code>18-08-2026.md</code> style journals to the canonical <code>2026-08-18.md</code>. Every original is copied to <code>backup/</code> first, and conflicting duplicates are skipped, never overwritten.</p>
 
   <h2 id="shortcuts">Keyboard shortcuts</h2>
   <table>
     <tr><th>Shortcut</th><th>Where</th><th>Action</th></tr>
-    <tr><td><span class="kbd">⌘S</span></td><td>Editor</td><td>Save, tidy (drop empty bullets, space wikilink groups) and close</td></tr>
-    <tr><td><span class="kbd">⎋</span></td><td>Editor</td><td>Save and close (dismisses autocomplete first)</td></tr>
+    <tr><td><span class="kbd">⌘N</span></td><td>Anywhere</td><td>New todo today — appends <code>- TODO</code> to today's note and opens the editor with the caret ready</td></tr>
+    <tr><td><span class="kbd">⌘F</span></td><td>Anywhere</td><td>Open search with the cursor in the search bar</td></tr>
+    <tr><td><span class="kbd">⎋</span></td><td>Search</td><td>Close the search panel</td></tr>
+    <tr><td><span class="kbd">⌥T</span></td><td>System-wide</td><td>Open the menu bar panel with the caret on the task field (configurable in Settings → Shortcuts)</td></tr>
+    <tr><td><span class="kbd">⌘S</span></td><td>Editor</td><td>Save, auto-format and close</td></tr>
+    <tr><td><span class="kbd">⎋</span></td><td>Editor</td><td>Save, auto-format and close (dismisses autocomplete first)</td></tr>
     <tr><td><span class="kbd">⌘⏎</span></td><td>Editor</td><td>Toggle TODO / DONE on the current line</td></tr>
     <tr><td><span class="kbd">⌘K</span></td><td>Editor</td><td>Link selection (clipboard URL → link, else <code>[[wikilink]]</code>)</td></tr>
     <tr><td><span class="kbd">⌘B</span> / <span class="kbd">⌘I</span></td><td>Editor</td><td>Bold / italic</td></tr>
@@ -206,7 +214,23 @@
 ├── pages/             [[wikilink]] targets
 ├── assets/            dropped images
 └── backup/            safety copies from migration</code></pre>
-  <p>Journal filenames: <code>yyyy-MM-dd.md</code> is canonical for new files; <code>yyyy_MM_dd.md</code> and <code>dd-MM-yyyy.md</code> are read transparently (and can be migrated in one click). Everything else — markers, properties (<code>Key:: value</code>), indentation — is plain Logseq markdown, so you can round-trip a vault between the two apps freely. The only DayStream-specific conventions are the optional <code>added::</code> / <code>completed::</code> timestamp properties, which Logseq simply shows as properties.</p>
+  <p>Journal filenames: <code>yyyy-MM-dd.md</code> is canonical for new files; <code>yyyy_MM_dd.md</code> and <code>dd-MM-yyyy.md</code> are read transparently (and can be migrated in one click). Everything else — markers, properties (<code>Key:: value</code>), indentation, code fences — is plain Logseq markdown, so you can round-trip a vault between the two apps freely. The only DayStream-specific conventions are the optional <code>added::</code> / <code>completed::</code> timestamp properties, which Logseq simply shows as properties.</p>
+
+  <h3 class="sub">A sample note</h3>
+<pre><code>- TODO Ship the parser fix
+	added:: 2026-08-19 09:12
+	- [[Parser Notes]] has the failing cases
+- DONE Reply to Alice about the review
+	added:: 2026-08-19 08:40
+	completed:: 2026-08-19 10:02
+
+- [[Gym]] log — 45 min, easy pace
+
+- Snippet from yesterday's debugging:
+	```sh
+	git log --oneline -5
+	```</code></pre>
+  <p>The <code>TODO</code>/<code>DONE</code> markers render with checkboxes; the <code>added::</code>/<code>completed::</code> pair powers the duration badge (<code>1h 22m</code>) next to the finished task; <code>[[Parser Notes]]</code> opens a page with every mention across the vault; the code fence renders as a monospaced card; and the blank lines between the different blocks are exactly what auto-format keeps when the editor closes.</p>
 
   <h2 id="building">Building from source</h2>
 <pre><code>git clone https://github.com/SubhadityaMukherjee/DayStream.git

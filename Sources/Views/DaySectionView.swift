@@ -17,6 +17,9 @@ struct DaySectionView: View {
     @State private var confirmDelete = false
     /// Incremented by addTodo; lands the caret after the appended "- TODO ".
     @State private var caretAtEndRequest = 0
+    /// Last appModel.newTodoRequest this cell consumed (only today's cell
+    /// reacts; cells are recycled so both onChange and onAppear check).
+    @State private var handledNewTodoRequest = 0
 
     private var isToday: Bool {
         day.date == JournalDate.startOfDay(Date())
@@ -67,6 +70,25 @@ struct DaySectionView: View {
             }
             base = newText
         }
+        .onChange(of: appModel.newTodoRequest) { _, _ in
+            handleNewTodoRequestIfToday()
+        }
+        .onAppear {
+            // A ⌘N may have fired before this cell existed (the list builds
+            // lazily; the scroll to today materializes it afterwards).
+            handleNewTodoRequestIfToday()
+        }
+    }
+
+    /// ⌘N lands here: today's cell appends a fresh "- TODO " and opens the
+    /// editor. Other cells just record the counter so a recycled today cell
+    /// never replays an old request.
+    private func handleNewTodoRequestIfToday() {
+        guard appModel.newTodoRequest != handledNewTodoRequest else { return }
+        if isToday {
+            addTodo()
+        }
+        handledNewTodoRequest = appModel.newTodoRequest
     }
 
     private var header: some View {
@@ -248,30 +270,25 @@ struct DaySectionView: View {
     }
 
     private func endEditing() {
-        flushSave()
+        saveTask?.cancel()
+        guard isEditing else { return }
         isEditing = false
         if appModel.editingDay == day.date {
             appModel.editingDay = nil
         }
+        guard let file = editFile else { return }
+        // Quitting the editor auto-formats, same as ⌘S.
+        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
+        draft = normalized
+        base = normalized
+        store.write(text: normalized, to: file.url)
     }
 
     /// ⌘S: normalize the draft (drop empty bullets, space out top-level
     /// `[[wikilink]]` groups, stamp `added::` on today's new tasks), write it,
     /// and leave edit mode.
     private func saveAndQuit() {
-        saveTask?.cancel()
-        guard let file = editFile else {
-            endEditing()
-            return
-        }
-        let normalized = NoteFormatter.normalizedForSave(draft, isToday: isToday, now: Date())
-        draft = normalized
-        base = normalized
-        store.write(text: normalized, to: file.url)
-        isEditing = false
-        if appModel.editingDay == day.date {
-            appModel.editingDay = nil
-        }
+        endEditing()
     }
 
     private func scheduleSave(_ text: String) {

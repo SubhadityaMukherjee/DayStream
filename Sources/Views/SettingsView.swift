@@ -28,6 +28,9 @@ struct SettingsView: View {
             RecurringTab()
                 .tabItem { Label("Recurring", systemImage: "repeat") }
                 .tag(AppModel.SettingsTab.recurring.rawValue)
+            ShortcutsTab()
+                .tabItem { Label("Shortcuts", systemImage: "keyboard") }
+                .tag(AppModel.SettingsTab.shortcuts.rawValue)
             AdvancedTab()
                 .tabItem { Label("Advanced", systemImage: "wrench.and.screwdriver") }
                 .tag(AppModel.SettingsTab.advanced.rawValue)
@@ -324,6 +327,152 @@ private struct RecurringTab: View {
     }
 }
 
+/// Keyboard shortcut reference (fixed, not configurable) plus the one
+/// configurable system-wide quick-add shortcut.
+private struct ShortcutsTab: View {
+    @Environment(AppSettings.self) private var settings
+    @State private var recording = false
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Global Quick Add") {
+                Toggle("Enable system-wide shortcut", isOn: $settings.globalQuickAddEnabled)
+                    .onChange(of: settings.globalQuickAddEnabled) { _, _ in
+                        MenuBarController.shared.refreshHotkey()
+                    }
+                HStack {
+                    Text(currentDisplay)
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 90, alignment: .leading)
+                    Button(recording ? "Press keys… (Esc cancels)" : "Record…") {
+                        recording = true
+                    }
+                    .disabled(!settings.globalQuickAddEnabled)
+                    if settings.quickAddHotkey != nil {
+                        Button("Reset") {
+                            settings.globalQuickAddSpec = AppSettings.HotkeySpec.defaultQuickAdd.storage
+                            MenuBarController.shared.refreshHotkey()
+                        }
+                        .disabled(recording)
+                    }
+                }
+                if recording {
+                    HotkeyRecorder(
+                        onRecord: { spec in
+                            settings.globalQuickAddSpec = spec.storage
+                            MenuBarController.shared.refreshHotkey()
+                            recording = false
+                        },
+                        onCancel: { recording = false }
+                    )
+                    .frame(height: 22)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(Color.accentColor, lineWidth: 1)
+                    )
+                }
+                Text("From any app: opens the DayStream menu bar panel with the caret on the task field. Shortcuts must include ⌘, ⌥ or ⌃.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("In DayStream") {
+                shortcutRow("⌘N", "New todo today (opens the editor, caret ready)")
+                shortcutRow("⌘F", "Open search and put the cursor in the search bar")
+                shortcutRow("⎋", "Close search (when open) or the editor")
+                shortcutRow("⌘,", "Open settings")
+            }
+
+            Section("In the editor") {
+                shortcutRow("⌘S", "Save, auto-format and close")
+                shortcutRow("⎋", "Save, auto-format and close")
+                shortcutRow("⌘⏎", "Toggle TODO / DONE on the current line")
+                shortcutRow("⌘K", "Link selection (clipboard URL → link, else [[wikilink]])")
+                shortcutRow("⌘B / ⌘I", "Bold / italic")
+                shortcutRow("⇥ / ⇧⇥", "Indent / outdent (or accept [[ autocomplete)")
+                shortcutRow("↑ / ↓", "Pick a page-name suggestion")
+                shortcutRow("/todo · /doing · /later · /now · /done", "Expand to task markers")
+            }
+
+            Section {
+                Text("The shortcuts above are fixed — only the global quick-add shortcut is configurable.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460, height: 560)
+    }
+
+    private var currentDisplay: String {
+        if !settings.globalQuickAddEnabled { return "Off" }
+        return settings.quickAddHotkey?.display ?? "None"
+    }
+
+    private func shortcutRow(_ keys: String, _ action: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(keys)
+                .font(.system(size: 12, weight: .medium))
+                .frame(width: 190, alignment: .leading)
+                .foregroundStyle(.secondary)
+            Text(action)
+                .font(.system(size: 12.5))
+        }
+    }
+}
+
+/// Captures the next key combination with ⌘/⌥/⌃ into a HotkeySpec. Click
+/// to arm (first responder), press a combo to record, Esc to cancel.
+private struct HotkeyRecorder: NSViewRepresentable {
+    var onRecord: (AppSettings.HotkeySpec) -> Void
+    var onCancel: () -> Void
+
+    func makeNSView(context: Context) -> RecorderView {
+        let view = RecorderView()
+        view.onRecord = onRecord
+        view.onCancel = onCancel
+        return view
+    }
+
+    func updateNSView(_ nsView: RecorderView, context: Context) {
+        nsView.onRecord = onRecord
+        nsView.onCancel = onCancel
+    }
+
+    final class RecorderView: NSView {
+        var onRecord: ((AppSettings.HotkeySpec) -> Void)?
+        var onCancel: (() -> Void)?
+
+        override var acceptsFirstResponder: Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+        override func mouseDown(with event: NSEvent) {
+            window?.makeFirstResponder(self)
+        }
+
+        override func keyDown(with event: NSEvent) {
+            if event.keyCode == 53 { // escape
+                onCancel?()
+                return
+            }
+            let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            // A bare letter would fire while typing everywhere — require a
+            // real modifier (⌘/⌥/⌃; ⇧ alone is not enough).
+            guard mods.contains(.command) || mods.contains(.option) || mods.contains(.control) else {
+                NSSound.beep()
+                return
+            }
+            let carbon = GlobalHotkeyManager.carbonModifiers(from: mods)
+            let display = GlobalHotkeyManager.displayString(keyCode: UInt32(event.keyCode),
+                                                             carbonModifiers: carbon)
+            onRecord?(AppSettings.HotkeySpec(carbonModifiers: carbon,
+                                             keyCode: UInt32(event.keyCode),
+                                             display: display))
+        }
+    }
+}
+
 /// Git-backed vault backup: enable toggle, detect or pick the repository
 /// folder (which may be a parent of the vault), then commit everything and
 /// push via the git CLI. When enabled, a Back Up button also appears in the
@@ -401,6 +550,27 @@ private struct AdvancedTab: View {
                 }
                 .disabled(!settings.gitBackupEnabled || !GitBackup.gitAvailable || !repoIsValid || appModel.isGitBackingUp)
 
+                Toggle("Back up automatically", isOn: $settings.autoBackupEnabled)
+                    .disabled(!settings.gitBackupEnabled || !GitBackup.gitAvailable || !repoIsValid)
+
+                Picker("Interval", selection: $settings.autoBackupInterval) {
+                    ForEach(AppSettings.AutoBackupInterval.allCases) { interval in
+                        Text(interval.label).tag(interval)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!settings.gitBackupEnabled || !settings.autoBackupEnabled || !GitBackup.gitAvailable || !repoIsValid)
+
+                Text("When enabled, the vault is backed up automatically in the background — weekly is the default. Automatic backup is off unless you turn it on.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if let last = settings.lastAutoBackup {
+                    Text("Last successful backup: \(Self.lastBackupFormatter.string(from: last))")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+
                 Text("Runs git add -A, commits with the message “\(GitBackup.commitMessage)”, and pushes to the repository's remote.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -441,6 +611,13 @@ private struct AdvancedTab: View {
     private var detectedRepo: URL? {
         appModel.store.map { GitBackup.containingRepo(for: $0.vaultRootURL) } ?? nil
     }
+
+    private static let lastBackupFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
 
     private func autoDetectRepo() {
         guard settings.gitBackupEnabled, settings.gitBackupPath.isEmpty, let repo = detectedRepo else { return }

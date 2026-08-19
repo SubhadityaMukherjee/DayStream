@@ -1,25 +1,45 @@
 import SwiftUI
+import AppKit
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Single window, no tabs: never auto-tab our windows, and there is
+        // no document model that would justify more than one.
+        NSWindow.allowsAutomaticWindowTabbing = false
+        MenuBarController.shared.setup()
+    }
+}
 
 @main
 struct DayStreamApp: App {
-    @State private var appModel = AppModel()
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @State private var appModel = AppModel.shared
     @State private var settings = AppSettings.shared
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        // `Window` (not WindowGroup): a single main window. Re-opening
+        // (dock click, menu bar applet, openWindow) reactivates the
+        // existing window instead of spawning another.
+        Window("DayStream", id: "main") {
             RootView()
                 .environment(appModel)
                 .environment(settings)
         }
         .windowStyle(.automatic)
         .windowToolbarStyle(.unified(showsTitle: false))
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("New Todo Today") {
+                    appModel.newTodoToday()
+                }
+                .keyboardShortcut("n", modifiers: .command)
 
-        MenuBarExtra("DayStream", systemImage: "note.text") {
-            MenuBarPanel()
-                .environment(appModel)
-                .environment(settings)
+                Button("Find in Vault…") {
+                    appModel.triggerSearch()
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
         }
-        .menuBarExtraStyle(.window)
 
         Settings {
             SettingsView()
