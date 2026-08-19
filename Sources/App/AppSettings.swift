@@ -17,6 +17,59 @@ final class AppSettings {
         static let welcome = "daystream.hasSeenWelcome"
         static let gitBackupPath = "daystream.gitBackupPath"
         static let gitBackupEnabled = "daystream.gitBackupEnabled"
+        static let autoBackupEnabled = "daystream.autoBackupEnabled"
+        static let autoBackupInterval = "daystream.autoBackupInterval"
+        static let lastAutoBackup = "daystream.lastAutoBackupDate"
+        static let globalQuickAddEnabled = "daystream.globalQuickAddEnabled"
+        static let globalQuickAddSpec = "daystream.globalQuickAddSpec"
+    }
+
+    /// Automatic git backup cadence: daily or weekly (weekly is the default).
+    enum AutoBackupInterval: Int, CaseIterable, Identifiable {
+        case daily = 1
+        case weekly = 2
+
+        var id: Int { rawValue }
+
+        var label: String {
+            switch self {
+            case .daily: return "Daily"
+            case .weekly: return "Weekly"
+            }
+        }
+
+        var seconds: TimeInterval {
+            switch self {
+            case .daily: return 24 * 3600
+            case .weekly: return 7 * 24 * 3600
+            }
+        }
+    }
+
+    /// A recorded global shortcut: Carbon modifiers + virtual key code plus
+    /// the display string captured at record time (translating key codes to
+    /// glyphs retroactively needs UCKeyTranslate, not worth it for one label).
+    struct HotkeySpec: Equatable {
+        var carbonModifiers: UInt32
+        var keyCode: UInt32
+        var display: String
+
+        /// ⌥T (optionKey = 1 << 11 = 2048; kVK_ANSI_T = 0x11 = 17).
+        static let defaultQuickAdd = HotkeySpec(carbonModifiers: 2048, keyCode: 17, display: "⌥T")
+
+        var storage: String {
+            "\(carbonModifiers),\(keyCode),\(display)"
+        }
+
+        static func parse(_ s: String) -> HotkeySpec? {
+            let parts = s.components(separatedBy: ",")
+            guard parts.count == 3,
+                  let mods = UInt32(parts[0]),
+                  let code = UInt32(parts[1]),
+                  !parts[2].isEmpty
+            else { return nil }
+            return HotkeySpec(carbonModifiers: mods, keyCode: code, display: parts[2])
+        }
     }
 
     /// 0 = system sans (SF Pro), 1 = serif (New York), 2 = rounded, 3 = monospace.
@@ -52,6 +105,41 @@ final class AppSettings {
     var gitBackupEnabled: Bool {
         didSet { UserDefaults.standard.set(gitBackupEnabled, forKey: Keys.gitBackupEnabled) }
     }
+    /// Automatic backup runs in the background at `autoBackupInterval`.
+    /// Off by default; the interval defaults to weekly.
+    var autoBackupEnabled: Bool {
+        didSet { UserDefaults.standard.set(autoBackupEnabled, forKey: Keys.autoBackupEnabled) }
+    }
+    var autoBackupIntervalRaw: Int {
+        didSet { UserDefaults.standard.set(autoBackupIntervalRaw, forKey: Keys.autoBackupInterval) }
+    }
+    var autoBackupInterval: AutoBackupInterval {
+        get { AutoBackupInterval(rawValue: autoBackupIntervalRaw) ?? .weekly }
+        set { autoBackupIntervalRaw = newValue.rawValue }
+    }
+    /// Wall-clock of the last successful backup (manual or automatic); drives
+    /// the next-due check. Nil = never backed up.
+    var lastAutoBackup: Date? {
+        didSet {
+            if let lastAutoBackup {
+                UserDefaults.standard.set(lastAutoBackup, forKey: Keys.lastAutoBackup)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.lastAutoBackup)
+            }
+        }
+    }
+    /// System-wide quick-add shortcut is active.
+    var globalQuickAddEnabled: Bool {
+        didSet { UserDefaults.standard.set(globalQuickAddEnabled, forKey: Keys.globalQuickAddEnabled) }
+    }
+    /// "modifiers,keyCode,display" for the global shortcut (see HotkeySpec).
+    var globalQuickAddSpec: String {
+        didSet { UserDefaults.standard.set(globalQuickAddSpec, forKey: Keys.globalQuickAddSpec) }
+    }
+
+    var quickAddHotkey: HotkeySpec? {
+        HotkeySpec.parse(globalQuickAddSpec)
+    }
 
     init() {
         let d = UserDefaults.standard
@@ -63,6 +151,11 @@ final class AppSettings {
         self.hasSeenWelcome = d.bool(forKey: Keys.welcome)
         self.gitBackupPath = d.string(forKey: Keys.gitBackupPath) ?? ""
         self.gitBackupEnabled = d.bool(forKey: Keys.gitBackupEnabled)
+        self.autoBackupEnabled = d.bool(forKey: Keys.autoBackupEnabled)
+        self.autoBackupIntervalRaw = d.object(forKey: Keys.autoBackupInterval) as? Int ?? AutoBackupInterval.weekly.rawValue
+        self.lastAutoBackup = d.object(forKey: Keys.lastAutoBackup) as? Date
+        self.globalQuickAddEnabled = d.object(forKey: Keys.globalQuickAddEnabled) as? Bool ?? true
+        self.globalQuickAddSpec = d.string(forKey: Keys.globalQuickAddSpec) ?? HotkeySpec.defaultQuickAdd.storage
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {

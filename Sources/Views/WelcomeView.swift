@@ -22,8 +22,8 @@ struct WelcomeView: View {
                 detail: "Click a link to open a page with linked references — or jump straight to a day like [[Aug 18th, 2026]]."),
         Feature(icon: "magnifyingglass", title: "Search everything",
                 detail: "One bar across every journal and page; results jump straight to the day or page."),
-        Feature(icon: "menubar.rectangle", title: "Menu bar quick add",
-                detail: "Capture a task for today — or schedule it to any date — without leaving what you're doing."),
+        Feature(icon: "keyboard", title: "Capture from anywhere",
+                detail: "A system-wide shortcut opens DayStream with a fresh todo in today's note, caret ready."),
     ]
 
     var body: some View {

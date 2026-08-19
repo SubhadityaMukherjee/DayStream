@@ -31,7 +31,7 @@ DayStream is a native macOS (SwiftUI + AppKit) daily-notes app that reads/writes
 | Sidebar, search bar, deadlines UI | `Sources/Views/MainView.swift` |
 | Page sheets (rendered + editor) | `Sources/Views/PageView.swift` |
 | Editor (AppKit) + `[[` autocomplete popover | `Sources/Editor/MarkdownEditorView.swift` |
-| App shell / app model (scheduling, rollover) / menu bar / settings | `Sources/App/` |
+| App shell / app model (scheduling, rollover) / global quick add / settings | `Sources/App/` |
 | Tests | `Tests/*.swift` |
 
 ## Tricky spots

@@ -333,7 +333,7 @@ private struct NewDeadlineSheet: View {
 }
 
 /// Floating search access: a glass button pinned bottom-right of the stream
-/// (⌘F toggles) that expands into a panel with the field and top matches.
+/// (⌘F opens) that expands into a panel with the field and top matches.
 /// Journals jump to their day; pages open in a sheet.
 struct FloatingSearchView: View {
     @Environment(AppModel.self) private var appModel
@@ -350,13 +350,32 @@ struct FloatingSearchView: View {
             }
             toggleButton
         }
+        .onChange(of: appModel.searchRequest) { _, _ in
+            openPanel()
+        }
+    }
+
+    /// ⌘F / menu / button: always open (never toggle closed) with the caret
+    /// in the field, so "find again" just works.
+    private func openPanel() {
+        withAnimation(.easeInOut(duration: 0.15)) { expanded = true }
+        focused = true
+    }
+
+    private func closePanel() {
+        withAnimation(.easeInOut(duration: 0.15)) { expanded = false }
+        focused = false
     }
 
     /// Plain style + circular glass: the .glass button style renders a
     /// rounded rect, so the shape is drawn by hand for a true circle.
     private var toggleButton: some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+            if expanded {
+                closePanel()
+            } else {
+                openPanel()
+            }
         } label: {
             Image(systemName: expanded ? "xmark" : "magnifyingglass")
                 .font(.system(size: 15, weight: .medium))
@@ -366,7 +385,6 @@ struct FloatingSearchView: View {
         }
         .buttonStyle(.plain)
         .floatingPanelBackground(in: Circle())
-        .keyboardShortcut("f", modifiers: .command)
         .help("Search all notes and pages (⌘F)")
     }
 
@@ -398,6 +416,7 @@ struct FloatingSearchView: View {
         .frame(width: 440, alignment: .leading)
         .floatingPanelBackground(in: RoundedRectangle(cornerRadius: 12))
         .onAppear { focused = true }
+        .onExitCommand { closePanel() }
     }
 
     private var field: some View {

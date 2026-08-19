@@ -19,7 +19,9 @@ struct BlockRowView: View {
                 .frame(width: 20, alignment: .leading)
 
             VStack(alignment: .leading, spacing: 2) {
-                if !block.isBullet, block.content.hasPrefix("#") {
+                if isWholeBlockCode {
+                    wholeBlockCode()
+                } else if !block.isBullet, block.content.hasPrefix("#") {
                     MarkdownText(content: block.content)
                         .font(settings.headingFont(level: headingLevel))
                 } else {
@@ -214,17 +216,40 @@ struct BlockRowView: View {
 
     @ViewBuilder
     private var bodyLines: some View {
-        // Body lines beyond the first raw line (first is the bullet itself).
-        let extra = block.rawLines.dropFirst()
-        if !extra.isEmpty {
-            ForEach(Array(extra.enumerated()), id: \.offset) { _, line in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if !trimmed.isEmpty, trimmed.range(of: "^[A-Za-z][A-Za-z0-9_-]*::", options: .regularExpression) == nil {
-                    MarkdownText(content: trimmed)
-                        .font(settings.streamFont)
-                        .foregroundStyle(.secondary)
+        // Body lines beyond the first raw line (first is the bullet itself),
+        // with fenced code blocks rendered as monospaced cards.
+        let extra = Array(block.rawLines.dropFirst())
+        let segments = BlockTree.bodySegments(extra)
+        if !segments.isEmpty {
+            ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                switch segment {
+                case .code(let language, let lines):
+                    CodeBlockView(language: language, code: lines.joined(separator: "\n"))
+                case .line(let line):
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty, trimmed.range(of: "^[A-Za-z][A-Za-z0-9_-]*::", options: .regularExpression) == nil {
+                        MarkdownText(content: trimmed)
+                            .font(settings.streamFont)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
+        }
+    }
+
+    /// A block whose very first line opens a fence (possible for non-bullet
+    /// root blocks, e.g. a note that starts with code).
+    private var isWholeBlockCode: Bool {
+        guard !block.isBullet, let first = block.rawLines.first else { return false }
+        return BlockTree.fenceMarker(first.trimmingCharacters(in: .whitespaces)) != nil
+    }
+
+    /// Whole block is one fence: re-segment to peel off the language and
+    /// the closing marker before rendering.
+    @ViewBuilder
+    private func wholeBlockCode() -> some View {
+        if case .code(let lang, let lines)? = BlockTree.bodySegments(block.rawLines).first {
+            CodeBlockView(language: lang, code: lines.joined(separator: "\n"))
         }
     }
 }

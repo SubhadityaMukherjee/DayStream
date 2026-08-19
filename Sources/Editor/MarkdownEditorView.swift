@@ -672,6 +672,9 @@ final class EditorTextView: NSTextView {
 
         let text = storage.string
         let lines = text.components(separatedBy: "\n")
+        let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
+        var fenceRanges: [NSRange] = []
+        var inFence = false
         var lineStart = 0
         for line in lines {
             // UTF-16 offsets: emoji make a line's scalar count diverge from
@@ -681,6 +684,27 @@ final class EditorTextView: NSTextView {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else { continue }
             let indentLen = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
+
+            // Fenced code blocks: monospaced, kept verbatim (no marker,
+            // wikilink or emphasis styling inside), tracked so the regex
+            // pass below can skip their ranges.
+            if BlockTree.fenceMarker(trimmed) != nil {
+                inFence.toggle()
+                storage.addAttributes([
+                    .font: mono,
+                    .foregroundColor: NSColor.systemBrown,
+                ], range: NSRange(location: lineStart, length: lineLen))
+                fenceRanges.append(NSRange(location: lineStart, length: lineLen))
+                continue
+            }
+            if inFence {
+                storage.addAttributes([
+                    .font: mono,
+                    .foregroundColor: NSColor.labelColor,
+                ], range: NSRange(location: lineStart, length: lineLen))
+                fenceRanges.append(NSRange(location: lineStart, length: lineLen))
+                continue
+            }
 
             // Headings.
             if trimmed.hasPrefix("#") {
@@ -708,12 +732,17 @@ final class EditorTextView: NSTextView {
             }
         }
 
-        // Wikilinks, code spans, emphasis — regex over the whole text.
+        // Wikilinks, code spans, emphasis — regex over the whole text, never
+        // inside fenced code blocks.
         let nsText = text as NSString
         func paint(pattern: String, attributes: [NSAttributedString.Key: Any]) {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return }
             regex.enumerateMatches(in: text, range: full) { match, _, _ in
-                guard let match else { return }
+                guard let match,
+                      !fenceRanges.contains(where: {
+                          NSIntersectionRange($0, match.range).length > 0
+                      })
+                else { return }
                 storage.addAttributes(attributes, range: match.range)
             }
         }

@@ -13,9 +13,12 @@
 		1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E026860706F7C832FDBE3CF /* VaultStore.swift */; };
 		2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A86F2ED4411BBE44B6243822 /* DaySectionView.swift */; };
 		2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6395EE5A200865344BF08F6C /* CalendarView.swift */; };
+		35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */; };
 		3A3F6731B5EA985E0F268EF4 /* WikiName.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF59C399937042AEE4E3CC43 /* WikiName.swift */; };
 		3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E42184F435A686A811D04BC /* SettingsView.swift */; };
+		3B7DADCA6CC32EBF2FCA94DE /* GlobalQuickAdd.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C2CAA3EBB24EC378F823AA0 /* GlobalQuickAdd.swift */; };
 		3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7095D2E8BAAA3630B334211 /* MarkdownText.swift */; };
+		4FE29F51D88AF44484DFFEC3 /* GlobalHotkey.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCA1348BAFDBBB6D4B124C42 /* GlobalHotkey.swift */; };
 		50FEECFABCA49B532F239D0F /* GlassStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 224A113A4AF60A3A3D934061 /* GlassStyle.swift */; };
 		58AA473C480CF1BCEF5B4CF6 /* Deadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C1E6CA336FB755C292C968 /* Deadline.swift */; };
 		5985E748E9FB36A2A60E1C87 /* BlockTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6325935B942277AF6F6D0638 /* BlockTree.swift */; };
@@ -37,7 +40,6 @@
 		CC95C10DB08ADCB0CB7B4941 /* VaultFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */; };
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
-		EC24269376B29BF7DB79BC57 /* MenuBarPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */; };
 		F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */; };
 /* End PBXBuildFile section */
 
@@ -56,6 +58,7 @@
 		0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		15757316319E7B2BC0AF72BD /* BlockRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockRowView.swift; sourceTree = "<group>"; };
+		172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeBlockAndFormatTests.swift; sourceTree = "<group>"; };
 		19C1E6CA336FB755C292C968 /* Deadline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Deadline.swift; sourceTree = "<group>"; };
 		2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayStreamApp.swift; sourceTree = "<group>"; };
 		224A113A4AF60A3A3D934061 /* GlassStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassStyle.swift; sourceTree = "<group>"; };
@@ -63,6 +66,7 @@
 		424E0ECF875895A3EC9513CA /* PageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageView.swift; sourceTree = "<group>"; };
 		46D7A88C7C41D3B06072764F /* NoteFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFormatter.swift; sourceTree = "<group>"; };
 		478B8797070D7D84A9968027 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
+		4C2CAA3EBB24EC378F823AA0 /* GlobalQuickAdd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalQuickAdd.swift; sourceTree = "<group>"; };
 		5D4BF23584F499B8D9BA92CE /* MultiFileDayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiFileDayTests.swift; sourceTree = "<group>"; };
 		620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockAndCarryTests.swift; sourceTree = "<group>"; };
 		6325935B942277AF6F6D0638 /* BlockTree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockTree.swift; sourceTree = "<group>"; };
@@ -82,7 +86,7 @@
 		C14A21F9F98D595DFF1FB767 /* DayStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5878FA05D237542D2AC416C /* RecurringTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringTask.swift; sourceTree = "<group>"; };
 		D28CCBC0CF4AC629300BDC1B /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
-		DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarPanel.swift; sourceTree = "<group>"; };
+		DCA1348BAFDBBB6D4B124C42 /* GlobalHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkey.swift; sourceTree = "<group>"; };
 		E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStreamView.swift; sourceTree = "<group>"; };
 		F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeView.swift; sourceTree = "<group>"; };
 		FF59C399937042AEE4E3CC43 /* WikiName.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiName.swift; sourceTree = "<group>"; };
@@ -131,6 +135,7 @@
 			isa = PBXGroup;
 			children = (
 				620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */,
+				172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */,
 				69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */,
 				5D4BF23584F499B8D9BA92CE /* MultiFileDayTests.swift */,
 				73A71BA98B107AE412A2CD3D /* NoteFormatterTests.swift */,
@@ -170,7 +175,8 @@
 				6B67635F43462BF67C2E4426 /* AppModel.swift */,
 				0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */,
 				2102D0879AC20C01BC6DC3A8 /* DayStreamApp.swift */,
-				DFA176E6BB3E6842E565AABC /* MenuBarPanel.swift */,
+				DCA1348BAFDBBB6D4B124C42 /* GlobalHotkey.swift */,
+				4C2CAA3EBB24EC378F823AA0 /* GlobalQuickAdd.swift */,
 				D28CCBC0CF4AC629300BDC1B /* SetupView.swift */,
 			);
 			path = App;
@@ -288,6 +294,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */,
+				35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */,
 				92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */,
 				BEF7AA884ACA542AA2659A1F /* MultiFileDayTests.swift in Sources */,
 				64ED75AA0EBEA0AC25BC3820 /* NoteFormatterTests.swift in Sources */,
@@ -311,11 +318,12 @@
 				58AA473C480CF1BCEF5B4CF6 /* Deadline.swift in Sources */,
 				F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */,
 				50FEECFABCA49B532F239D0F /* GlassStyle.swift in Sources */,
+				4FE29F51D88AF44484DFFEC3 /* GlobalHotkey.swift in Sources */,
+				3B7DADCA6CC32EBF2FCA94DE /* GlobalQuickAdd.swift in Sources */,
 				74926DDCBCC2C9ED8C04BA94 /* JournalDate.swift in Sources */,
 				1436703D1FF1DE32722616F5 /* MainView.swift in Sources */,
 				C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */,
 				3F0BEAEF1D2D1B21CF5B16B9 /* MarkdownText.swift in Sources */,
-				EC24269376B29BF7DB79BC57 /* MenuBarPanel.swift in Sources */,
 				BFC8E450AC41BCCFE6555D58 /* NoteFormatter.swift in Sources */,
 				C1595A58F8C302348B31E8A5 /* PageView.swift in Sources */,
 				86055AC10FE5F4A5B13B4A23 /* RecurringTask.swift in Sources */,
@@ -412,7 +420,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -521,7 +529,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.4.0;
+				MARKETING_VERSION = 1.6.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

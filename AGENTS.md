@@ -18,7 +18,7 @@ Always run `xcodegen generate` after creating/moving source files, and `./script
 - `Sources/Model/` — pure logic, no UI: `BlockTree` (outliner parser + todo toggling/syncing), `VaultStore` (vault I/O, watching, migration), `JournalDate` (filename formats), `CarryForward`, `WikiName`. Most logic is unit-tested in `Tests/`.
 - `Sources/Views/` — SwiftUI: `DailyStreamView` (List of `DaySectionView`), `BlockRowView` (recursive block renderer), `CalendarView`, `PageView` (wikilink pages + linked references), `SettingsView`.
 - `Sources/Editor/MarkdownEditorView.swift` — AppKit `NSTextView` wrapper, content-fitting (caps at 560pt, scrolls internally), with outliner key bindings. Space-bar handling uses a local keyDown monitor because SwiftUI's ScrollView eats unmodified space. `[[` autocomplete is a non-activating NSPanel (`WikiSuggestController`) that must never take key focus.
-- `Sources/App/` — `DayStreamApp` (WindowGroup + MenuBarExtra + Settings), `AppModel` (selection/navigation state), `AppSettings` (UserDefaults-backed), `MenuBarPanel` (quick add + today's tasks).
+- `Sources/App/` — `DayStreamApp` (Window + Settings), `AppModel` (selection/navigation state), `AppSettings` (UserDefaults-backed), `GlobalQuickAddController` (system-wide quick-add shortcut → opens app + new todo today).
 - `@Observable` everywhere; `VaultStore` mutates `days` in place to avoid full-list SwiftUI rebuilds (block IDs are `line-<index>` so unchanged rows keep identity across edits).
 
 ## Conventions & gotchas
