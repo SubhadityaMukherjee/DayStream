@@ -116,6 +116,12 @@ private struct GeneralTab: View {
             Section("Vault") {
                 vaultRow
             }
+            Section("Editor") {
+                Toggle("Live markdown rendering", isOn: $settings.liveMarkdownRendering)
+                Text("In the editor, markdown fades into rendered text on lines you're not editing — bold, italics, links, wikilinks, code spans and headings. The line with the caret always shows the raw markdown.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Section("Tasks") {
                 Toggle("Sync task state across notes", isOn: $settings.syncTodosAcrossNotes)
                 Text("Checking a task updates every note that repeats the same task text — journals and pages alike.")
@@ -378,16 +384,16 @@ private struct ShortcutsTab: View {
             }
 
             Section("In DayStream") {
-                shortcutRow("⌘N", "New todo today (opens the editor, caret ready)")
+                shortcutRow("⌘N", "New todo today (caret ready)")
                 shortcutRow("⌘F", "Open search and put the cursor in the search bar")
-                shortcutRow("⎋", "Close search (when open) or the editor")
+                shortcutRow("⎋", "Close search (when open) or the open page")
                 shortcutRow("⌘,", "Open settings")
             }
 
             Section("In the editor") {
-                shortcutRow("⌘S", "Save, auto-format and close")
-                shortcutRow("⎋", "Save, auto-format and close")
-                shortcutRow("⌘⏎", "Toggle TODO / DONE on the current line")
+                shortcutRow("⌘S", "Save and auto-format (stay in the note)")
+                shortcutRow("⎋", "Flush the pending save (closes a page)")
+                shortcutRow("⌘⏎ or the checkbox", "Toggle TODO / DONE on a task (syncs across notes)")
                 shortcutRow("⌘K", "Link selection (clipboard URL → link, else [[wikilink]])")
                 shortcutRow("⌘B / ⌘I", "Bold / italic")
                 shortcutRow("⇥ / ⇧⇥", "Indent / outdent (or accept [[ autocomplete)")

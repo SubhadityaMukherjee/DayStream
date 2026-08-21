@@ -266,12 +266,21 @@ final class VaultStore {
         }
         write(text: newText, to: file.url)
         guard syncAcrossNotes, block.todoState != .none, !key.isEmpty else { return }
+        syncTodoState(taskContent: block.content, to: target, excluding: file.url)
+    }
+
+    /// Rewrites matching tasks in every other note to `target` — used after
+    /// an editor-side toggle (⌘⏎), where the toggled note's text is already
+    /// in the editor and only the cross-note echo is the store's job.
+    func syncTodoState(taskContent: String, to target: TodoState, excluding editedURL: URL) {
+        let key = BlockTree.normalize(taskContent)
+        guard !key.isEmpty else { return }
         // Snapshot candidates on the main thread, then match/rewrite off-main so
         // a click never stalls the UI on large vaults; results are applied back
         // on the main thread.
         var others: [(url: URL, text: String)] = []
         for day in days {
-            for f in day.files where f.url != file.url {
+            for f in day.files where f.url != editedURL {
                 others.append((f.url, f.text))
             }
         }

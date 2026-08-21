@@ -1,23 +1,24 @@
 import SwiftUI
 
-/// One day in the stream: sticky header + rendered blocks, or the raw
-/// markdown editor when editing. Saves are debounced. Text typed into the
-/// editor lives in `session` (a class held by @State) — per-keystroke writes
-/// must never touch @State here, or the whole section (glass chrome
-/// included) re-renders on every key press.
+/// One day in the stream: sticky header + the always-live editor. There is
+/// no rendered/editing split — the editor itself is the view, with markdown
+/// syntax rendering and hiding around the caret (see LiveMarkdown). Saves
+/// are debounced; ⌘S auto-formats. Text typed into the editor lives in
+/// `session` (a class held by @State) — per-keystroke writes must never
+/// touch @State here, or the whole section (glass chrome included)
+/// re-renders on every key press.
 struct DaySectionView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
     let day: JournalDay
     let store: VaultStore
 
-    @State private var isEditing = false
     @State private var session = EditorSession()
     @State private var confirmDelete = false
     /// Incremented by addTodo; lands the caret after the appended "- TODO ".
     @State private var caretAtEndRequest = 0
-    /// External text to push into the open editor (watcher adoption while
-    /// the draft is clean, add-todo append while already editing).
+    /// External text to push into the live editor (watcher adoption while
+    /// the draft is clean, add-todo append, ⌘S normalization).
     @State private var pushedText: String?
     /// Last appModel.newTodoRequest this cell consumed (only today's cell
     /// reacts; cells are recycled so both onChange and onAppear check).
@@ -32,42 +33,36 @@ struct DaySectionView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             header
+            Divider().opacity(0.35)
             content
         }
-        .padding(.vertical, 10)
+        // One glass card per day — date header and editor share a single
+        // surface instead of nested bubbles.
+        .glassCardBackground(in: RoundedRectangle(cornerRadius: 14))
+        .padding(.vertical, 5)
         .overlay(alignment: .bottom) {
             Divider().opacity(0.5)
         }
-        // One container per day so the header card and the badges inside its
-        // blocks batch into a single glass render pass — without this each
-        // badge pays for its own effect and scrolling stutters.
         .glassContainer(spacing: 0)
         .onDisappear {
             flushSave()
         }
-        .onChange(of: appModel.editingDay) { _, newEditingDay in
-            if newEditingDay != day.date, isEditing {
-                endEditing()
-            }
-        }
         .onChange(of: day.date) { _, _ in
             // The stream's List recycles rows: if this cell is handed a
-            // different day, drop any leftover edit state from the old one
-            // (pending saves were already flushed by onDisappear).
+            // different day, drop any leftover draft from the old one
+            // (pending saves were already flushed by onDisappear) and adopt
+            // the new day's text.
             session.cancelSave()
-            session.text = ""
-            session.base = ""
-            pushedText = nil
-            isEditing = false
+            syncSessionFromFile()
         }
         .onChange(of: editFile?.text) { _, newText in
             // External change (carry-forward, another editor, file watcher):
             // adopt it if the user hasn't typed since the last sync, so a
-            // stale draft can never overwrite the file on close. Pushing
-            // into the editor re-renders this section once (not per keystroke).
-            guard isEditing, let newText else { return }
+            // stale draft can never overwrite the file. Pushing into the
+            // editor re-renders this section once (not per keystroke).
+            guard let newText else { return }
             if session.isClean, newText != session.text {
                 session.text = newText
                 pushedText = newText
@@ -78,13 +73,24 @@ struct DaySectionView: View {
             handleNewTodoRequestIfToday()
         }
         .onAppear {
+            syncSessionFromFile()
             // A ⌘N may have fired before this cell existed (the list builds
             // lazily; the scroll to today materializes it afterwards).
             handleNewTodoRequestIfToday()
         }
     }
 
-    /// ⌘N lands here: today's cell appends a fresh "- TODO " and opens the
+    /// Points the session (and, if needed, the live editor) at the file's
+    /// current text. The editor captures `text:` only at creation; anything
+    /// after that flows through `pushedText`.
+    private func syncSessionFromFile() {
+        let fileText = editFile?.text ?? ""
+        session.text = fileText
+        session.base = fileText
+        pushedText = fileText
+    }
+
+    /// ⌘N lands here: today's cell appends a fresh "- TODO " and focuses the
     /// editor. Other cells just record the counter so a recycled today cell
     /// never replays an old request.
     private func handleNewTodoRequestIfToday() {
@@ -139,8 +145,7 @@ struct DaySectionView: View {
             editorControls
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .glassCardBackground(in: RoundedRectangle(cornerRadius: 10))
+        .padding(.top, 6)
     }
 
     private var editorControls: some View {
@@ -150,37 +155,21 @@ struct DaySectionView: View {
             }
             .buttonStyle(.roundIcon)
             .help("Add a task to this day")
-
-            Button {
-                if isEditing {
-                    endEditing()
-                } else {
-                    startEditing()
-                }
-            } label: {
-                Image(systemName: isEditing ? "checkmark" : "square.and.pencil")
-            }
-            .buttonStyle(.roundIcon(isEditing ? .green : .secondary))
-            .help(isEditing ? "Done (⎋)" : "Edit this day")
         }
     }
 
-    /// "+" — append a fresh `- TODO ` line and open the editor with the
-    /// caret after it, so only the task title needs typing.
+    /// "+" — append a fresh `- TODO ` line and land the caret after it, so
+    /// only the task title needs typing.
     private func addTodo() {
         flushSave()
         let ensured = store.ensureDayFile(for: day.date)
-        let baseText = isEditing ? session.text : ensured.text
+        let baseText = session.text.isEmpty ? ensured.text : session.text
         let separator = baseText.isEmpty || baseText.hasSuffix("\n") ? "" : "\n"
         let newText = baseText + separator + "- TODO "
         session.text = newText
         session.base = newText
         pushedText = newText
         caretAtEndRequest += 1
-        if !isEditing {
-            isEditing = true
-            appModel.editingDay = day.date
-        }
         store.write(text: newText, to: ensured.url)
     }
 
@@ -195,81 +184,32 @@ struct DaySectionView: View {
         store.reload()
     }
 
-    @ViewBuilder
     private var content: some View {
-        if isEditing {
-            MarkdownEditorView(
-                text: session.text,
-                pushedText: pushedText,
-                imageImporter: imageImporter,
-                pageNamesProvider: { [weak store] in store?.allPageNames() ?? [] },
-                onTextChanged: { newText in
-                    session.text = newText
-                    scheduleSave(newText)
-                },
-                onCommit: {
-                    endEditing()
-                },
-                onSaveCommit: {
-                    saveAndQuit()
-                },
-                caretAtEndRequest: caretAtEndRequest
-            )
-            .padding(.horizontal, -6)
-            .padding(10)
-            .glassCardBackground(in: RoundedRectangle(cornerRadius: 12))
-            .transition(.opacity)
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(day.displayFiles, id: \.url) { file in
-                    fileView(file)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-            // Simultaneous so single clicks still reach `[[wikilinks]]`.
-            .simultaneousGesture(TapGesture(count: 2).onEnded { startEditing() })
-        }
-    }
-
-    @ViewBuilder
-    private func fileView(_ file: VaultFile) -> some View {
-        if file.blocks.isEmpty {
-            emptyPlaceholder
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(file.blocks) { block in
-                    BlockRowView(block: block, file: file, store: store)
-                }
-            }
-        }
-    }
-
-    private var emptyPlaceholder: some View {
-        HStack {
-            Text(isToday ? "Nothing here yet — double-click to write, or carry forward unfinished tasks."
-                         : "Empty note.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .glassCardBackground(in: RoundedRectangle(cornerRadius: 8))
-        .contentShape(.rect)
-        .simultaneousGesture(TapGesture(count: 2).onEnded {
-            if isToday { startEditing() }
-        })
-    }
-
-    private func startEditing() {
-        flushSave()
-        guard let file = editFile else { return }
-        session.text = file.text
-        session.base = file.text
-        pushedText = nil
-        isEditing = true
-        appModel.editingDay = day.date
+        MarkdownEditorView(
+            text: session.text,
+            pushedText: pushedText,
+            imageImporter: imageImporter,
+            pageNamesProvider: { [weak store] in store?.allPageNames() ?? [] },
+            onTextChanged: { newText in
+                session.text = newText
+                scheduleSave(newText)
+            },
+            onCommit: {
+                flushSave()
+            },
+            onSaveCommit: {
+                saveAndNormalize()
+            },
+            onTodoToggled: { taskContent, nowDone in
+                guard settings.syncTodosAcrossNotes, let file = editFile else { return }
+                store.syncTodoState(taskContent: taskContent,
+                                    to: nowDone ? .done : .open,
+                                    excluding: file.url)
+            },
+            caretAtEndRequest: caretAtEndRequest
+        )
+        .padding(.horizontal, 6)
+        .padding(.bottom, 8)
     }
 
     /// Dropped images are copied into the vault's assets/ directory and embedded.
@@ -277,26 +217,17 @@ struct DaySectionView: View {
         store.importImage(data, originalName: name)
     }
 
-    private func endEditing() {
+    /// ⌘S: normalize the draft (drop empty bullets, space out top-level
+    /// `[[wikilink]]` groups, stamp `added::` on today's new tasks), write
+    /// it, and push the normalized text back into the editor (caret kept).
+    private func saveAndNormalize() {
         session.cancelSave()
-        guard isEditing else { return }
-        isEditing = false
-        if appModel.editingDay == day.date {
-            appModel.editingDay = nil
-        }
         guard let file = editFile else { return }
-        // Quitting the editor auto-formats, same as ⌘S.
         let normalized = NoteFormatter.normalizedForSave(session.text, isToday: isToday, now: Date())
         session.text = normalized
         session.base = normalized
+        pushedText = normalized
         store.write(text: normalized, to: file.url)
-    }
-
-    /// ⌘S: normalize the draft (drop empty bullets, space out top-level
-    /// `[[wikilink]]` groups, stamp `added::` on today's new tasks), write it,
-    /// and leave edit mode.
-    private func saveAndQuit() {
-        endEditing()
     }
 
     private func scheduleSave(_ text: String) {
@@ -315,7 +246,7 @@ struct DaySectionView: View {
     private func flushSave() {
         session.cancelSave()
         // The scheduled task may have been cancelled before firing: save inline if dirty.
-        guard isEditing, let file = editFile, session.text != file.text else { return }
+        guard let file = editFile, session.text != file.text else { return }
         store.write(text: session.text, to: file.url)
     }
 
