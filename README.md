@@ -7,7 +7,7 @@ Author: **Subhaditya Mukherjee**
 ## What it does
 
 - **Daily-notes stream** — every dated note in `journals/`, newest first, with a month calendar sidebar for quick navigation. Notes for new days are created automatically (launch, Today button, calendar clicks, midnight rollover). One window, no tabs — re-opening just brings it back.
-- **Outliner editing** — Enter continues bullets, Tab/Shift-Tab indent/outdent, `/todo `/`/doing `/`/later `/`/done ` slash commands, TODO-family markers with live syntax highlighting. Saving (⌘S or closing the editor) auto-formats: consistent tabs and `-` bullets, collapsed blank runs, and blank lines between different block kinds (text, lists, `[[wikilink]]` groups, code fences).
+- **Outliner editing** — Enter continues bullets, Tab/Shift-Tab indent/outdent, `/todo`/`/doing`/`/later`/`/done` slash commands, TODO-family markers with live syntax highlighting. Saving (⌘S or closing the editor) auto-formats: consistent tabs and `-` bullets, collapsed blank runs, and blank lines between different block kinds (text, lists, `[[wikilink]]` groups, code fences).
 - **Markdown code blocks** — fenced ` ``` `/`~~~` blocks render as monospaced cards (with the language label from the info string), stay byte-identical through auto-formatting, and get their own highlighting in the editor.
 - **Task timing** — captured tasks record `added::` timestamps; completing one stamps `completed::` and the stream shows how long it took next to the finished task.
 - **Task syncing** — checking a task rewrites matching tasks in every other note (journals and pages alike).
@@ -19,6 +19,37 @@ Author: **Subhaditya Mukherjee**
 - **Git backup** — commit and push the vault to its git remote in one click (Settings → Advanced), or automatically on a daily/weekly schedule (off by default, weekly suggested).
 - **Image & file drops** — dropped images are copied into `assets/` and embedded with relative markdown links.
 - **Live on disk** — external edits are picked up via file watching; the vault is safe to use from other tools at the same time.
+
+## A sample note
+
+````markdown
+- TODO Ship the parser fix
+  added:: 2026-08-19 09:12
+  - [[Parser Notes]] has the failing cases
+- DONE Reply to Alice about the review
+  added:: 2026-08-19 08:40
+  completed:: 2026-08-19 10:02
+
+- [[Gym]] log — 45 min, easy pace
+
+- Snippet from yesterday's debugging:
+  ```sh
+  git log --oneline -5
+  ```
+````
+
+What the pieces do: `TODO`/`DONE` markers render with checkboxes; `added::` / `completed::` properties power the duration badge (`1h 22m`) next to finished tasks (these are automatically added); `[[Parser Notes]]` opens a page with every mention of it (Linked References); code fences render as monospaced cards; blank lines between different block kinds are kept by auto-format.
+
+## App screenshots
+
+> A bunch of things redacted for my privacy since I use this everyday ;p
+
+![The main window — one endless stream of daily notes with the calendar sidebar](docs/screenshots/main_window.png)
+
+| ![Search across every journal and page](docs/screenshots/search.png) | ![Wikilink pages with Linked References](docs/screenshots/linked_refs.png) |
+|:---:|:---:|
+| ![Recurring tasks and deadlines](docs/screenshots/recurring_events.png) | ![Shortcut reference and the global quick-add recorder](docs/screenshots/shortcuts.png) |
+| ![General settings](docs/screenshots/general_settings.png) | ![Git backup settings](docs/screenshots/git_backup.png) |
 
 ## Requirements
 
@@ -51,29 +82,9 @@ Recognized journal filename formats: `yyyy-MM-dd.md` (current convention, used f
 ./scripts/migrate_filenames /path/to/vault --apply   # backup + rename
 ```
 
-## A sample note
-
-```markdown
-- TODO Ship the parser fix
-	added:: 2026-08-19 09:12
-	- [[Parser Notes]] has the failing cases
-- DONE Reply to Alice about the review
-	added:: 2026-08-19 08:40
-	completed:: 2026-08-19 10:02
-
-- [[Gym]] log — 45 min, easy pace
-
-- Snippet from yesterday's debugging:
-	```sh
-	git log --oneline -5
-	```
-```
-
-What the pieces do: `TODO`/`DONE` markers render with checkboxes; `added::` / `completed::` properties power the duration badge (`1h 22m`) next to finished tasks; `[[Parser Notes]]` opens a page with every mention of it (Linked References); code fences render as monospaced cards; blank lines between different block kinds are kept by auto-format.
-
 ## Documentation
 
-- Full usage guide & FAQ (GitHub Pages): https://subhadityamukherjee.github.io/DayStream/
+- Full usage guide & FAQ (GitHub Pages): <https://subhadityamukherjee.github.io/DayStream/>
 - This README renders on the repo home page.
 
 ## Branching & releases

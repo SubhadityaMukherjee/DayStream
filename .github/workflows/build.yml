@@ -127,6 +127,7 @@ jobs:
         run: |
           mkdir -p _site
           cp docs/index.html _site/index.html
+          cp -R docs/screenshots _site/screenshots
           cp Resources/Assets.xcassets/AppIcon.appiconset/appicon.png _site/icon.png
           cp README.md _site/readme.md
 

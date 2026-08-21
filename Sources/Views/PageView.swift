@@ -1,19 +1,24 @@
 import SwiftUI
 
-/// Sheet for a `[[wikilink]]` page. Renders like the front page (blocks +
-/// linked references); "Edit" switches to the raw markdown editor, where
-/// ⎋/⌘S save and return to the rendered view.
+/// Sheet for a `[[wikilink]]` page. The page *is* the editor (live markdown
+/// rendering, no edit/view split), with linked references below. ⎋ saves
+/// and closes; ⌘S auto-formats and keeps the sheet open.
 struct PageView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
     let pageName: String
 
-    @State private var text = ""
     @State private var loaded = false
     @State private var pageURL: URL?
     @State private var isDirty = false
-    @State private var isEditing = false
+    /// Live editor text and the debounced save task. Kept outside @State
+    /// invalidation (a class in @State): per-keystroke writes here must not
+    /// re-render the sheet on every key press. `text` stays synced at save
+    /// boundaries and is what empty-checks and mentions read.
+    @State private var session = EditorSession()
+    /// External text to push into the live editor (⌘S normalization).
+    @State private var pushedText: String?
     @State private var mentions: [VaultStore.Mention] = []
     @State private var confirmDelete = false
 
@@ -24,29 +29,33 @@ struct PageView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    if isEditing {
-                        MarkdownEditorView(
-                            text: $text,
-                            imageImporter: imageImporter,
-                            pageNamesProvider: { [weak appModel] in appModel?.store?.allPageNames() ?? [] },
-                            onTextChanged: { _ in
+                    MarkdownEditorView(
+                        text: session.text,
+                        pushedText: pushedText,
+                        imageImporter: imageImporter,
+                        pageNamesProvider: { [weak appModel] in appModel?.store?.allPageNames() ?? [] },
+                        onTextChanged: { newText in
+                            session.text = newText
+                            if !isDirty {
                                 isDirty = true
-                                scheduleSave()
-                            },
-                            onCommit: {
-                                exitEditing()
-                            },
-                            onSaveCommit: {
-                                saveAndQuit()
                             }
-                        )
-                        .padding(.horizontal, 8)
-                    } else {
-                        renderedContent
-                            .padding(.horizontal, 8)
-                            .contentShape(.rect)
-                            .simultaneousGesture(TapGesture(count: 2).onEnded { startEditing() })
-                    }
+                            scheduleSave()
+                        },
+                        onCommit: {
+                            save()
+                            dismiss()
+                        },
+                        onSaveCommit: {
+                            saveAndNormalize()
+                        },
+                        onTodoToggled: { taskContent, nowDone in
+                            guard settings.syncTodosAcrossNotes, let url = pageURL else { return }
+                            appModel.store?.syncTodoState(taskContent: taskContent,
+                                                           to: nowDone ? .done : .open,
+                                                           excluding: url)
+                        }
+                    )
+                    .padding(.horizontal, 8)
 
                     mentionsSection
                         .padding(.horizontal, 8)
@@ -63,7 +72,8 @@ struct PageView: View {
             if let store = appModel.store {
                 let url = store.pageURL(named: pageName, createIfMissing: true)
                 pageURL = url
-                text = url.map { store.pageText(at: $0) } ?? ""
+                session.text = url.map { store.pageText(at: $0) } ?? ""
+                session.base = session.text
                 refreshMentions()
             }
         }
@@ -103,92 +113,29 @@ struct PageView: View {
                 }
             }
 
-            Button {
-                if isEditing {
-                    exitEditing()
-                } else {
-                    startEditing()
-                }
-            } label: {
-                Image(systemName: isEditing ? "checkmark.circle.fill" : "square.and.pencil")
-                    .foregroundStyle(isEditing ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
-            .help(isEditing ? "Done (⎋ or ⌘S)" : "Edit this page")
-
             Button("Close") {
-                if isEditing {
-                    exitEditing()
-                } else {
-                    save()
-                    dismiss()
-                }
+                save()
+                dismiss()
             }
             .keyboardShortcut(.defaultAction)
         }
         .padding()
     }
 
-    // MARK: - Rendered (front-page style) content
-
-    @ViewBuilder
-    private var renderedContent: some View {
-        let blocks = BlockTree.parse(text)
-        if blocks.isEmpty {
-            Text("Empty page — double-click to write.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
-                .padding(.vertical, 6)
-        } else {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(blocks) { block in
-                    BlockRowView(block: block, file: renderFile, store: appModel.store ?? dummyStore, onToggle: toggleOnPage)
-                }
-            }
-        }
-    }
-
-    private var renderFile: VaultFile {
-        VaultFile(url: pageURL ?? URL(fileURLWithPath: "/dev/null"), date: Date(), text: text)
-    }
-
-    private var dummyStore: VaultStore {
-        VaultStore(vaultURL: URL(fileURLWithPath: "/dev/null"), watchEnabled: false)
-    }
-
-    /// Toggles a task inside this page and refreshes the local text (page
-    /// writes bypass the days array, so the store can't push updates here).
-    private func toggleOnPage(_ block: Block) {
-        guard let url = pageURL, let store = appModel.store else { return }
-        let file = VaultFile(url: url, date: Date(), text: text)
-        store.toggleTodo(in: file, block: block, syncAcrossNotes: settings.syncTodosAcrossNotes)
-        text = store.pageText(at: url)
-        isDirty = false
-        refreshMentions()
-    }
-
-    // MARK: - Editing
-
-    private func startEditing() {
+    /// ⌘S: normalize the draft, write it, and push the normalized text back
+    /// into the editor (caret kept).
+    private func saveAndNormalize() {
+        session.cancelSave()
+        let normalized = NoteFormatter.normalizedForSave(session.text, isToday: false, now: Date())
+        session.text = normalized
+        session.base = normalized
+        pushedText = normalized
         save()
-        isEditing = true
-    }
-
-    private func exitEditing() {
-        // Quitting the editor auto-formats, same as ⌘S.
-        text = NoteFormatter.normalizedForSave(text, isToday: false, now: Date())
-        save()
-        isEditing = false
-    }
-
-    private func saveAndQuit() {
-        saveTask?.cancel()
-        exitEditing()
     }
 
     private var pageTextIsEmpty: Bool? {
         guard let pageURL else { return nil }
-        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return session.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Linked references
@@ -260,11 +207,9 @@ struct PageView: View {
 
     // MARK: - Saving / deletion
 
-    @State private var saveTask: Task<Void, Never>?
-
     private func scheduleSave() {
-        saveTask?.cancel()
-        saveTask = Task {
+        session.cancelSave()
+        session.saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             await MainActor.run { save() }
@@ -276,8 +221,8 @@ struct PageView: View {
         let url = pageURL ?? store.pageURL(named: pageName, createIfMissing: true)
         guard let url else { return }
         let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if current != text {
-            store.write(text: text, to: url)
+        if current != session.text {
+            store.write(text: session.text, to: url)
             isDirty = false
             refreshMentions()
         }
@@ -285,7 +230,7 @@ struct PageView: View {
 
     private func deleteEmptyPage() {
         guard let store = appModel.store, let url = pageURL else { return }
-        saveTask?.cancel()
+        session.cancelSave()
         try? FileManager.default.removeItem(at: url)
         store.reload()
         dismiss()
