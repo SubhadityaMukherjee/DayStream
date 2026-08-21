@@ -5,13 +5,14 @@ import AppKit
 /// - Enter continues the bullet at the same indent (empty bullet exits the list)
 /// - Tab / Shift-Tab indent / outdent the current line
 /// - `/todo `, `/doing `, `/later `, `/done ` expand to TODO-style markers
-/// - Escape ends editing (and flushes the pending save)
-/// - ⌘S saves-and-quits via `onSaveCommit` (callers normalize text first)
+/// - Escape flushes the pending save (callers decide what "done" means)
+/// - ⌘S auto-formats and saves via `onSaveCommit` (callers normalize text first)
 /// - ⌘K links the selection (URL on the clipboard -> `[text](url)`, else `[[wikilink]]`)
-/// - ⌘⏎ toggles the current line's TODO/DONE marker
+/// - ⌘⏎ toggles the current line's TODO/DONE marker (sync handled by caller)
 /// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
-/// - Live highlighting of markers, `[[wikilinks]]`, code spans, headings
+/// - Live preview: markdown syntax renders and hides on lines away from the
+///   caret (glyph-level — the raw text never changes; see LiveMarkdown)
 ///
 /// Data flow: the text view owns the text while editing. `text` is read only
 /// at creation, and external corrections arrive via `pushedText` — keystrokes
@@ -34,11 +35,15 @@ struct MarkdownEditorView: NSViewRepresentable {
     var onTextChanged: ((String) -> Void)? = nil
     var onCommit: (() -> Void)? = nil
     var onSaveCommit: (() -> Void)? = nil
+    /// Fired after ⌘⏎ toggles a line's marker: the task content (text minus
+    /// bullet/marker) and whether it is now done. Callers echo the state to
+    /// matching tasks in other notes via `VaultStore.syncTodoState`.
+    var onTodoToggled: ((_ taskContent: String, _ nowDone: Bool) -> Void)? = nil
     /// Increment to move the caret to the end on the next update (used after
     /// appending a task template, where preserving the old caret is wrong).
     var caretAtEndRequest: Int = 0
 
-    func makeNSView(context: Context) -> EditorScrollView {
+    func makeNSView(context: Context) -> EditorContainerView {
         let tv = EditorTextView()
         tv.font = font ?? AppSettings.shared.editorFont()
         tv.textColor = .labelColor
@@ -49,49 +54,62 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
         tv.isContinuousSpellCheckingEnabled = false
-        tv.textContainerInset = NSSize(width: 0, height: 6)
+        tv.textContainerInset = Self.inset(liveMarkdown: AppSettings.shared.liveMarkdownRendering)
         tv.textContainer?.lineFragmentPadding = 4
+        // Content-fitting, not scrolling: width tracks the container, height
+        // is whatever the text needs (set in the container's layout pass).
+        tv.isVerticallyResizable = false
+        tv.isHorizontallyResizable = false
+        tv.textContainer?.widthTracksTextView = true
+        tv.textContainer?.heightTracksTextView = false
+        tv.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         tv.string = text
+        tv.revealAllSyntaxInitially()
+        tv.layoutManager?.delegate = tv
+        tv.liveMarkdownEnabled = AppSettings.shared.liveMarkdownRendering
+        context.coordinator.appliedLiveMarkdown = tv.liveMarkdownEnabled
         tv.delegate = context.coordinator
         tv.onCommit = onCommit
         tv.onSaveCommit = onSaveCommit
+        tv.onTodoToggled = onTodoToggled
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
         tv.highlight()
         context.coordinator.appliedFontSignature = Self.fontSignature(tv.font)
         context.coordinator.installSpaceMonitor(for: tv)
 
-        let scroll = EditorScrollView()
-        scroll.documentView = tv
-        // Overlay scroller: visible while scrolling, gone otherwise. Without
-        // a scroller, long notes had no way to see position/length.
-        scroll.hasVerticalScroller = true
-        scroll.scrollerStyle = .overlay
-        scroll.hasHorizontalScroller = false
-        scroll.drawsBackground = false
-        scroll.editor = tv
+        let container = EditorContainerView()
+        container.editor = tv
+        tv.autoresizingMask = [.width]
+        container.addSubview(tv)
 
+        // Focus is opt-in: every day in the stream is an editor now, and a
+        // cell materialized by scrolling must never steal first responder.
+        // ⌘N-style flows bump `caretAtEndRequest`, which focuses here (cell
+        // not yet alive) or in updateNSView (already alive).
+        context.coordinator.lastCaretAtEndRequest = caretAtEndRequest
         DispatchQueue.main.async {
-            tv.window?.makeFirstResponder(tv)
+            if caretAtEndRequest > 0 {
+                tv.window?.makeFirstResponder(tv)
+            }
             let end = NSRange(location: (tv.string as NSString).length, length: 0)
             tv.selectedRange = end
-            // Journal content grows at the bottom: land the view there too,
-            // not just the caret (the caret alone doesn't scroll the editor).
             tv.scrollRangeToVisible(end)
         }
-        return scroll
+        return container
     }
 
-    static func dismantleNSView(_ nsView: EditorScrollView, coordinator: Coordinator) {
+    static func dismantleNSView(_ nsView: EditorContainerView, coordinator: Coordinator) {
         coordinator.removeSpaceMonitor()
         nsView.editor?.closeSuggestions()
     }
 
-    func updateNSView(_ nsView: EditorScrollView, context: Context) {
+    func updateNSView(_ nsView: EditorContainerView, context: Context) {
         guard let tv = nsView.editor else { return }
         tv.onTextChanged = onTextChanged
         tv.onCommit = onCommit
         tv.onSaveCommit = onSaveCommit
+        tv.onTodoToggled = onTodoToggled
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
 
@@ -103,6 +121,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
         if context.coordinator.lastCaretAtEndRequest != caretAtEndRequest {
             context.coordinator.lastCaretAtEndRequest = caretAtEndRequest
+            tv.window?.makeFirstResponder(tv)
             let end = NSRange(location: (tv.string as NSString).length, length: 0)
             tv.selectedRange = end
             tv.scrollRangeToVisible(end)
@@ -118,6 +137,18 @@ struct MarkdownEditorView: NSViewRepresentable {
             tv.highlight()
             nsView.invalidateIntrinsicContentSize()
         }
+        let liveRendering = AppSettings.shared.liveMarkdownRendering
+        if context.coordinator.appliedLiveMarkdown != liveRendering {
+            context.coordinator.appliedLiveMarkdown = liveRendering
+            tv.liveMarkdownEnabled = liveRendering
+        }
+    }
+
+    /// Horizontal inset doubles as the glyph gutter: when live preview is on,
+    /// checkboxes / bullet dashes draw there and every line's text starts at
+    /// a fixed column — content never shifts between raw and rendered states.
+    static func inset(liveMarkdown: Bool) -> NSSize {
+        NSSize(width: liveMarkdown ? 24 : 0, height: 6)
     }
 
     private static func fontSignature(_ font: NSFont?) -> String {
@@ -133,6 +164,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         var appliedPushedText: String?
         var lastCaretAtEndRequest = 0
         var appliedFontSignature: String?
+        var appliedLiveMarkdown: Bool?
         private var spaceMonitor: Any?
         private weak var textView: EditorTextView?
 
@@ -173,6 +205,11 @@ struct MarkdownEditorView: NSViewRepresentable {
             tv.handleTextChanged()
             tv.onTextChanged?(tv.string)
         }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? EditorTextView else { return }
+            tv.refreshActiveLineHiding()
+        }
     }
 }
 
@@ -196,10 +233,14 @@ final class EditorSession {
     }
 }
 
-/// Scroll view that sizes itself to fit the text view, so the outer stream scrolls.
-/// Tall notes cap at 560pt and scroll inside with the overlay scroller.
-final class EditorScrollView: NSScrollView {
+/// Content-fitting host for the text view. No scrolling of its own — the
+/// enclosing stream does all of it. (An inner NSScrollView, even with no
+/// scrollers, intercepted wheel events at the editor's edges and made the
+/// stream sticky.) Sizes itself to the full text height.
+final class EditorContainerView: NSView {
     weak var editor: EditorTextView?
+
+    override var isFlipped: Bool { true }
 
     override var intrinsicContentSize: NSSize {
         guard let tv = editor, let container = tv.textContainer, let layout = container.layoutManager else {
@@ -207,7 +248,15 @@ final class EditorScrollView: NSScrollView {
         }
         layout.ensureLayout(for: container)
         let height = layout.usedRect(for: container).height + tv.textContainerInset.height * 2 + 8
-        return NSSize(width: -1, height: min(max(height, 96), 560))
+        return NSSize(width: -1, height: max(height, 96))
+    }
+
+    override func layout() {
+        super.layout()
+        guard let tv = editor, let container = tv.textContainer, let layout = container.layoutManager else { return }
+        layout.ensureLayout(for: container)
+        let height = layout.usedRect(for: container).height + tv.textContainerInset.height * 2
+        tv.frame = NSRect(x: 0, y: 0, width: bounds.width, height: height)
     }
 }
 
@@ -215,6 +264,7 @@ final class EditorTextView: NSTextView {
     var onTextChanged: ((String) -> Void)?
     var onCommit: (() -> Void)?
     var onSaveCommit: (() -> Void)?
+    var onTodoToggled: ((_ taskContent: String, _ nowDone: Bool) -> Void)?
     var imageImporter: ((Data, String?) -> String?)? = nil
     var pageNamesProvider: (() -> [String])? = nil
     private var suggest: WikiSuggestController?
@@ -225,12 +275,49 @@ final class EditorTextView: NSTextView {
     private var pendingExternalText: String?
     /// Idle-timer that reconciles cross-line effects (fences) after typing.
     private var highlightReconcileTask: Task<Void, Never>?
+    /// Live markdown preview: syntax on lines away from the caret renders as
+    /// null (zero-width) glyphs; the raw characters never leave the storage.
+    var liveMarkdownEnabled = true {
+        didSet {
+            guard oldValue != liveMarkdownEnabled else { return }
+            textContainerInset = MarkdownEditorView.inset(liveMarkdown: liveMarkdownEnabled)
+            revealAllSyntaxInitially()
+            decorationsDirty = true
+            invalidateAllGlyphs()
+            needsDisplay = true
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    /// Full line(s) the selection touches — their syntax stays visible so
+    /// the line being edited always shows its raw markdown.
+    private var activeLineCharRange = NSRange(location: 0, length: 0)
+    private var lastFenceLineCount = -1
+
+    /// One bullet line's rendered marker (drawn in the gutter).
+    struct LineDecoration {
+        let lineRange: NSRange
+        /// TODO/DOING/LATER/NOW/DONE, nil for plain bullets.
+        let marker: String?
+        /// "2h 15m" for finished tasks that carry added:: + completed::.
+        let duration: String?
+    }
+    private(set) var decorations: [LineDecoration] = []
+    private var decorationsDirty = true
+    /// Checkbox rects from the last draw pass — the click target list.
+    private(set) var checkboxRects: [(rect: NSRect, lineRange: NSRange)] = []
+    private var lastCheckboxRectsKey = ""
 
     deinit {
         highlightReconcileTask?.cancel()
     }
 
     // MARK: - Text change plumbing
+
+    /// Content height changed: tell the hosting container so SwiftUI
+    /// re-sizes the day's row.
+    func invalidateFittingSize() {
+        (superview as? EditorContainerView)?.invalidateIntrinsicContentSize()
+    }
 
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?) -> Bool {
         let ok = super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
@@ -248,8 +335,11 @@ final class EditorTextView: NSTextView {
     func handleTextChanged() {
         applyPendingExternalText()
         highlightPendingEdit()
+        refreshActiveLineHiding()
         updateSuggestions()
-        (enclosingScrollView as? EditorScrollView)?.invalidateIntrinsicContentSize()
+        invalidateFittingSize()
+        decorationsDirty = true
+        needsDisplay = true
     }
 
     /// Replaces the whole text with an externally produced version, keeping
@@ -263,13 +353,14 @@ final class EditorTextView: NSTextView {
         }
         pendingEditRange = nil
         let sel = selectedRange()
+        revealAllSyntaxInitially()
         string = newText
         highlight()
         selectedRange = NSRange(location: min(sel.location, (newText as NSString).length), length: 0)
         scrollRangeToVisible(selectedRange)
-        (enclosingScrollView as? EditorScrollView)?.invalidateIntrinsicContentSize()
+        refreshActiveLineHiding()
+        invalidateFittingSize()
     }
-
     private func applyPendingExternalText() {
         guard let pending = pendingExternalText, !hasMarkedText() else { return }
         pendingExternalText = nil
@@ -355,8 +446,46 @@ final class EditorTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         closeSuggestions()
+        if event.clickCount == 1 {
+            let point = convert(event.locationInWindow, from: nil)
+            // Checkbox clicks toggle without taking focus or moving the
+            // caret: focusing would surface this editor's dormant selection
+            // (the end-of-text position set at creation) and drag the caret
+            // there. The toggle itself needs no first responder.
+            let sloppy = NSRect(x: point.x - 3, y: point.y - 3, width: 6, height: 6)
+            for (rect, lineRange) in checkboxRects where rect.intersects(sloppy) {
+                toggleTodo(atLineStart: lineRange.location)
+                return
+            }
+            // On the caret's line the raw marker word shows instead of the
+            // checkbox — clicking the word toggles too. ±1 char because
+            // characterIndex snaps to the nearest glyph boundary.
+            let index = characterIndex(for: point)
+            if index != NSNotFound, let marker = todoMarkerRange(around: index) {
+                let len = (string as NSString).length
+                let near = [max(index - 1, 0), index, min(index + 1, len)]
+                if near.contains(where: { NSLocationInRange($0, marker.marker) }) {
+                    selectedRange = NSRange(location: marker.lineStart, length: 0)
+                    toggleTodoOnCurrentLine()
+                    return
+                }
+            }
+        }
         window?.makeFirstResponder(self)
         super.mouseDown(with: event)
+    }
+
+    /// Marker word + enclosing line if `index` sits on a TODO-family marker.
+    private func todoMarkerRange(around index: Int) -> (lineStart: Int, marker: NSRange)? {
+        let s = string as NSString
+        guard index <= s.length else { return nil }
+        let lineRange = s.lineRange(for: NSRange(location: min(index, s.length), length: 0))
+        guard lineRange.length > 0 else { return nil }
+        let line = s.substring(with: lineRange)
+        guard let inLine = LiveMarkdown.todoMarkerRange(inLine: line) else { return nil }
+        let absolute = NSRange(location: lineRange.location + inLine.location, length: inLine.length)
+        guard NSLocationInRange(index, absolute) else { return nil }
+        return (lineRange.location, absolute)
     }
 
     // MARK: - ⌘K: link the selection
@@ -392,12 +521,21 @@ final class EditorTextView: NSTextView {
         return URL(string: raw.contains("://") || raw.hasPrefix("/") || raw.hasPrefix("assets/") ? raw : raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)!)
     }
 
-    // MARK: - ⌘⏎: toggle TODO/DONE on the current line
+    // MARK: - ⌘⏎ / checkbox: toggle TODO/DONE
 
     private func toggleTodoOnCurrentLine() {
         let s = string as NSString
         let caret = selectedRange().location
-        let lineRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
+        let lineStart = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0)).location
+        toggleTodo(atLineStart: lineStart)
+    }
+
+    /// Toggles without moving the caret: checkbox clicks must keep the line
+    /// inactive, or it flips to raw syntax ("TODO" text) and back — a flash.
+    private func toggleTodo(atLineStart lineStart: Int) {
+        let s = string as NSString
+        guard lineStart <= s.length else { return }
+        let lineRange = s.lineRange(for: NSRange(location: lineStart, length: 0))
         let line = s.substring(with: lineRange)
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") else { return }
@@ -415,6 +553,11 @@ final class EditorTextView: NSTextView {
                     with: to
                 )
                 didChangeText()
+                if to == "DONE" {
+                    stampCompletion(lineStart: lineRange.location)
+                }
+                let content = rest.dropFirst(from.count).trimmingCharacters(in: .whitespaces)
+                onTodoToggled?(content, to == "DONE")
             }
             return
         }
@@ -428,6 +571,20 @@ final class EditorTextView: NSTextView {
             with: "TODO "
         )
         didChangeText()
+        onTodoToggled?(rest, false)
+    }
+
+    /// Records when a task was finished, exactly like the old rendered-view
+    /// checkbox did (`VaultStore.toggleTodo` → `withCompletionStamp`): a
+    /// `completed::` property line under the bullet, updated in place on
+    /// re-completion. Without this, duration badges never light up for
+    /// editor-toggled tasks.
+    private func stampCompletion(lineStart: Int) {
+        let s = string as NSString
+        let lineIndex = s.substring(to: lineStart).components(separatedBy: "\n").count - 1
+        let stamped = NoteFormatter.withCompletionStamp(s as String, blockLineIndex: lineIndex, at: Date())
+        guard stamped != s as String else { return }
+        applyExternalText(stamped)
     }
 
     // MARK: - Selection wrapping (bold / italic)
@@ -749,15 +906,14 @@ final class EditorTextView: NSTextView {
         ]
     }
 
-    /// Patterns are line-local (`\n` excluded), so per-line application is
-    /// equivalent to a whole-document pass — and lets typing highlight just
-    /// the edited line.
-    private static let wikilinkRegex = try! NSRegularExpression(pattern: #"\[\[[^\[\]\n]+\]\]"#)
-    private static let codeSpanRegex = try! NSRegularExpression(pattern: #"`[^`\n]+`"#)
-    private static let boldRegex = try! NSRegularExpression(pattern: #"\*\*[^*\n]+\*\*"#)
+    /// Patterns are line-local (`\n` excluded) and live in LiveMarkdown,
+    /// shared with the live-preview hider so styling and hiding always
+    /// agree on what counts as syntax.
 
     func highlight() {
         guard let storage = textStorage else { return }
+        decorationsDirty = true
+        needsDisplay = true
         let full = NSRange(location: 0, length: storage.length)
         let baseFont = font ?? .systemFont(ofSize: 14)
 
@@ -807,8 +963,21 @@ final class EditorTextView: NSTextView {
         highlightReconcileTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            await MainActor.run { self?.highlight() }
+            await MainActor.run {
+                self?.highlight()
+                self?.reconcileFenceDrivenHiding()
+            }
         }
+    }
+
+    /// Opening or closing a fence flips which following lines are verbatim
+    /// code (their "syntax" is literal text and must not be hidden);
+    /// regenerate glyphs when the fence-marker count moved.
+    private func reconcileFenceDrivenHiding() {
+        let count = fenceLineCount
+        defer { lastFenceLineCount = count }
+        guard count != lastFenceLineCount else { return }
+        invalidateAllGlyphs()
     }
 
     /// Whether a fenced code block is open at `index` (start of a line).
@@ -821,6 +990,16 @@ final class EditorTextView: NSTextView {
             }
         }
         return open
+    }
+
+    /// Subtle metadata color for bookkeeping lines (`added::` stamps):
+    /// semi-transparent white on dark glass, semi-transparent black in light
+    /// mode so it stays legible either way.
+    private static let metadataColor: NSColor = NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return isDark
+            ? NSColor.white.withAlphaComponent(0.55)
+            : NSColor.black.withAlphaComponent(0.45)
     }
 
     /// Styles one line (range excludes the newline). Resets base attributes
@@ -836,6 +1015,16 @@ final class EditorTextView: NSTextView {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
         let mono = NSFont.monospacedSystemFont(ofSize: baseFont.pointSize - 1, weight: .regular)
+
+        // Bookkeeping properties: quiet gray while visible (on the active
+        // line), fully hidden once the caret moves away.
+        if LiveMarkdown.isBookkeepingPropertyLine(trimmed) {
+            storage.addAttributes([
+                .font: mono,
+                .foregroundColor: Self.metadataColor,
+            ], range: lineRange)
+            return
+        }
 
         // Fenced code blocks: monospaced, kept verbatim (no marker, wikilink
         // or emphasis styling inside).
@@ -854,8 +1043,8 @@ final class EditorTextView: NSTextView {
             return
         }
 
-        // Headings.
-        if trimmed.hasPrefix("#") {
+        // Headings — real ones only; `#hashtags` keep their marker.
+        if LiveMarkdown.isHeadingLine(trimmed) {
             storage.addAttributes([
                 .font: NSFont.systemFont(ofSize: baseFont.pointSize + 1.5, weight: .semibold),
             ], range: lineRange)
@@ -878,6 +1067,14 @@ final class EditorTextView: NSTextView {
                             .foregroundColor: color,
                             .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .semibold),
                         ], range: r)
+                        // Finished tasks strike through and dim their
+                        // content, like the old rendered rows did.
+                        if marker == "DONE", NSMaxRange(r) < NSMaxRange(lineRange) {
+                            storage.addAttributes([
+                                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                                .foregroundColor: NSColor.secondaryLabelColor,
+                            ], range: NSRange(location: NSMaxRange(r), length: NSMaxRange(lineRange) - NSMaxRange(r)))
+                        }
                     }
                     break
                 }
@@ -892,14 +1089,385 @@ final class EditorTextView: NSTextView {
                 }
             }
         }
-        paint(Self.wikilinkRegex, [.foregroundColor: NSColor.readableLink])
-        paint(Self.codeSpanRegex, [
+        paint(LiveMarkdown.wikilinkRegex, [.foregroundColor: NSColor.readableLink])
+        paint(LiveMarkdown.codeSpanRegex, [
             .font: mono,
             .foregroundColor: NSColor.systemBrown,
         ])
-        paint(Self.boldRegex, [
+        paint(LiveMarkdown.boldRegex, [
             .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .bold),
         ])
+
+        // Italic content — matches overlapping a bold span are its markers.
+        var boldMatches: [NSRange] = []
+        LiveMarkdown.boldRegex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
+            if let match { boldMatches.append(match.range) }
+        }
+        LiveMarkdown.italicRegex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
+            guard let match,
+                  !boldMatches.contains(where: { NSIntersectionRange($0, match.range).length > 0 })
+            else { return }
+            let content = NSRange(location: match.range.location + 1, length: match.range.length - 2)
+            guard content.length > 0 else { return }
+            storage.addAttributes(
+                [.font: NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)],
+                range: content)
+        }
+
+        // Markdown links: label reads as a link; brackets and URL hide
+        // when the line is away from the caret (see LiveMarkdown).
+        LiveMarkdown.linkRegex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
+            guard let match else { return }
+            let matchText = s.substring(with: match.range)
+            let close = (matchText as NSString).range(of: "]")
+            guard close.location != NSNotFound, close.location >= 2 else { return }
+            storage.addAttributes([
+                .foregroundColor: NSColor.readableLink,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ], range: NSRange(location: match.range.location + 1, length: close.location - 1))
+        }
+    }
+
+    // MARK: - Gutter decorations (checkboxes, bullet dashes, duration badges)
+
+    /// On inactive lines the bullet prefix renders away (null glyphs) and a
+    /// marker glyph is drawn in the gutter instead: a checkbox for task
+    /// lines, a dash for plain bullets. The caret's line keeps its raw
+    /// syntax, mirroring how the rest of the live preview behaves.
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        guard liveMarkdownEnabled, let layoutManager, let container = textContainer else {
+            checkboxRects = []
+            return
+        }
+        if decorationsDirty { rebuildDecorations() }
+        checkboxRects = []
+        let s = string as NSString
+        let baseFont = font ?? .systemFont(ofSize: 14)
+
+        for deco in decorations {
+            guard deco.lineRange.length > 0,
+                  NSIntersectionRange(deco.lineRange, activeLineCharRange).length == 0
+            else { continue }
+            let glyphRange = layoutManager.glyphRange(forCharacterRange: deco.lineRange, actualCharacterRange: nil)
+            guard glyphRange.length > 0 else { continue }
+            let fragment = layoutManager.lineFragmentRect(
+                forGlyphAt: glyphRange.location, effectiveRange: nil)
+
+            // Content start x: first glyph after the hidden prefix.
+            let line = s.substring(with: deco.lineRange)
+            let prefix = LiveMarkdown.renderableBulletPrefix(inLine: line) ?? NSRange(location: 0, length: 0)
+            let contentStart = deco.lineRange.location + prefix.location + prefix.length
+            var contentX = fragment.minX
+            if contentStart < NSMaxRange(deco.lineRange) {
+                let contentGlyphs = layoutManager.glyphRange(
+                    forCharacterRange: NSRange(location: contentStart, length: 1), actualCharacterRange: nil)
+                if contentGlyphs.length > 0 {
+                    contentX = layoutManager.boundingRect(
+                        forGlyphRange: NSRange(location: contentGlyphs.location, length: 1), in: container).minX
+                }
+            }
+
+            if deco.marker != nil {
+                let box = drawCheckbox(in: fragment, contentX: contentX, done: deco.marker == "DONE")
+                checkboxRects.append((box, deco.lineRange))
+            } else {
+                drawBulletDash(contentX: contentX, fragment: fragment, baseFont: baseFont)
+            }
+            if let duration = deco.duration {
+                drawDurationBadge(duration, fragment: fragment)
+            }
+        }
+        // Cursor rects only rebuild on mouse-move/geometry events; ask the
+        // window for a refresh when the checkbox set actually changed.
+        let key = checkboxRects
+            .map { "\(Int($0.rect.minX))~\(Int($0.rect.minY))" }
+            .joined(separator: "|")
+        if key != lastCheckboxRectsKey {
+            lastCheckboxRectsKey = key
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+
+    /// Pointing hand over checkboxes — added after super so they win over
+    /// the text view's I-beam where they overlap.
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        guard liveMarkdownEnabled else { return }
+        for (rect, _) in checkboxRects {
+            addCursorRect(rect.insetBy(dx: -3, dy: -3), cursor: .pointingHand)
+        }
+    }
+
+    private func drawCheckbox(in fragment: NSRect, contentX: CGFloat, done: Bool) -> NSRect {
+        let size: CGFloat = 13.5
+        let x = contentX + textContainerInset.width - size - 6
+        let y = fragment.midY + textContainerInset.height - size / 2
+        let rect = NSRect(x: x, y: y, width: size, height: size)
+        let box = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
+        box.lineWidth = 1.3
+        let color: NSColor = done ? .systemGreen : .secondaryLabelColor.withAlphaComponent(0.65)
+        color.setStroke()
+        box.stroke()
+        if done {
+            // Flipped coordinates (NSTextView): y grows downward, so a "✓"
+            // goes down to the bottom-middle, then up to the top-right.
+            let check = NSBezierPath()
+            check.move(to: NSPoint(x: rect.minX + 3.1, y: rect.minY + size * 0.56))
+            check.line(to: NSPoint(x: rect.minX + size * 0.42, y: rect.minY + size * 0.82))
+            check.line(to: NSPoint(x: rect.maxX - 2.9, y: rect.minY + size * 0.24))
+            check.lineWidth = 1.8
+            check.lineCapStyle = .round
+            check.lineJoinStyle = .round
+            NSColor.systemGreen.setStroke()
+            check.stroke()
+        }
+        return rect
+    }
+
+    private func drawBulletDash(contentX: CGFloat, fragment: NSRect, baseFont: NSFont) {
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: baseFont.pointSize, weight: .medium),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+        ]
+        let dash = "-" as NSString
+        let size = dash.size(withAttributes: attrs)
+        let x = contentX + textContainerInset.width - size.width - 9
+        let y = fragment.midY + textContainerInset.height - size.height / 2
+        dash.draw(at: NSPoint(x: x, y: y), withAttributes: attrs)
+    }
+
+    private static let durationAttrs: [NSAttributedString.Key: Any] = [
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+        .foregroundColor: NSColor.systemGreen,
+    ]
+    private static let durationIcon: NSImage? = {
+        let base = NSImage(systemSymbolName: "clock.arrow.circlepath", accessibilityDescription: nil)
+        let config = NSImage.SymbolConfiguration(paletteColors: [.systemGreen])
+        return base?.withSymbolConfiguration(config)
+    }()
+
+    /// Completion-time badge for finished tasks, like the old rendered rows:
+    /// green capsule at the line's trailing edge (the `completed::` line it
+    /// summarizes is hidden and collapsed).
+    private func drawDurationBadge(_ duration: String, fragment: NSRect) {
+        let text = duration as NSString
+        let textSize = text.size(withAttributes: Self.durationAttrs)
+        let h: CGFloat = 15
+        let iconSize: CGFloat = 9
+        let w = 6 + iconSize + 3 + textSize.width + 6
+        let x = bounds.width - w - 10
+        let y = fragment.midY + textContainerInset.height - h / 2
+        let capsule = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h),
+                                   xRadius: h / 2, yRadius: h / 2)
+        NSColor.systemGreen.withAlphaComponent(0.13).setFill()
+        capsule.fill()
+        Self.durationIcon?.draw(in: NSRect(x: x + 6, y: y + (h - iconSize) / 2, width: iconSize, height: iconSize))
+        text.draw(at: NSPoint(x: x + 6 + iconSize + 3, y: y + (h - textSize.height) / 2),
+                  withAttributes: Self.durationAttrs)
+    }
+
+    private func rebuildDecorations() {
+        decorationsDirty = false
+        decorations = []
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let text = storage.string
+        let lines = text.components(separatedBy: "\n")
+        var starts: [Int] = []
+        var offset = 0
+        for line in lines {
+            starts.append(offset)
+            offset += (line as NSString).length + 1
+        }
+
+        // Duration per task line, from the block parse (`added::`/`completed::`).
+        var durations: [Int: String] = [:]
+        func collect(_ blocks: [Block]) {
+            for block in blocks {
+                if block.todoState == .done, block.isBullet, lines.indices.contains(block.lineIndex),
+                   let added = block.properties.first(where: { $0.key.lowercased() == "added" })?.value,
+                   let completed = block.properties.first(where: { $0.key.lowercased() == "completed" })?.value,
+                   let a = NoteFormatter.parseTimestamp(added),
+                   let c = NoteFormatter.parseTimestamp(completed),
+                   c >= a {
+                    durations[starts[block.lineIndex]] = NoteFormatter.duration(from: a, to: c)
+                }
+                collect(block.children)
+            }
+        }
+        collect(BlockTree.parse(text))
+
+        var inFence = false
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if BlockTree.fenceMarker(trimmed) != nil { inFence.toggle(); continue }
+            if inFence { continue }
+            let full = NSRange(location: 0, length: (line as NSString).length)
+            guard LiveMarkdown.bulletPrefixRegex.firstMatch(in: line, range: full) != nil else { continue }
+            let marker = LiveMarkdown.todoMarkerRange(inLine: line)
+                .map { String((line as NSString).substring(with: $0)) }
+            decorations.append(LineDecoration(
+                lineRange: NSRange(location: starts[i], length: (line as NSString).length),
+                marker: marker,
+                duration: durations[starts[i]]))
+        }
+    }
+}
+
+// MARK: - Live markdown preview
+
+extension EditorTextView {
+    /// Everything visible until the first real layout; the caret-landing
+    /// selection change then narrows the active line for real.
+    func revealAllSyntaxInitially() {
+        activeLineCharRange = NSRange(location: 0, length: textStorage?.length ?? 0)
+        lastFenceLineCount = fenceLineCount
+    }
+
+    /// Re-derives the active line from the selection and regenerates glyphs
+    /// for the lines whose visibility flipped. Cheap: two line ranges.
+    func refreshActiveLineHiding() {
+        guard let layoutManager, let storage = textStorage else { return }
+        guard storage.length > 0 else {
+            activeLineCharRange = NSRange(location: 0, length: 0)
+            return
+        }
+        let s = storage.string as NSString
+        let loc = min(selectedRange().location, s.length)
+        let len = min(selectedRange().length, s.length - loc)
+        let newActive = s.lineRange(for: NSRange(location: loc, length: len))
+        guard !NSEqualRanges(newActive, activeLineCharRange) else { return }
+
+        for r in [activeLineCharRange, newActive] where r.length > 0 && r.location < s.length {
+            let clamped = NSRange(location: r.location, length: min(r.length, s.length - r.location))
+            layoutManager.invalidateGlyphs(forCharacterRange: clamped, changeInLength: 0, actualCharacterRange: nil)
+            layoutManager.invalidateLayout(forCharacterRange: clamped, actualCharacterRange: nil)
+        }
+        activeLineCharRange = newActive
+        invalidateFittingSize()
+        // Marker visibility (checkbox vs raw word) flips with the active line.
+        needsDisplay = true
+    }
+
+    func invalidateAllGlyphs() {
+        guard let layoutManager, let storage = textStorage, storage.length > 0 else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        layoutManager.invalidateGlyphs(forCharacterRange: full, changeInLength: 0, actualCharacterRange: nil)
+        layoutManager.invalidateLayout(forCharacterRange: full, actualCharacterRange: nil)
+        invalidateFittingSize()
+    }
+
+    private var fenceLineCount: Int {
+        guard let storage = textStorage, storage.length > 0 else { return 0 }
+        let s = storage.string as NSString
+        var count = 0
+        s.enumerateSubstrings(in: NSRange(location: 0, length: s.length), options: .byLines) { sub, _, _, _ in
+            if let sub, BlockTree.fenceMarker(sub.trimmingCharacters(in: .whitespaces)) != nil {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    /// Hide-set for a glyph-generation chunk: per-line syntax ranges over the
+    /// chunk's lines, skipping fenced code and the active line. Fence state
+    /// needs a doc-start scan — same cost profile as the existing
+    /// fenceOpen(before:) pass; daily notes stay small.
+    private func hiddenRanges(forCharacterRange range: NSRange) -> [NSRange] {
+        guard let storage = textStorage, storage.length > 0 else { return [] }
+        let s = storage.string as NSString
+        let loc = min(range.location, s.length)
+        let len = min(range.length, s.length - loc)
+        guard len > 0 else { return [] }
+        let covered = s.lineRange(for: NSRange(location: loc, length: len))
+        var hidden: [NSRange] = []
+        var inFence = false
+        s.enumerateSubstrings(in: NSRange(location: 0, length: NSMaxRange(covered)), options: .byLines) { sub, lineRange, _, _ in
+            let opensFence = sub.map { BlockTree.fenceMarker($0.trimmingCharacters(in: .whitespaces)) != nil } ?? false
+            defer { if opensFence { inFence.toggle() } }
+            guard !inFence else { return }
+            guard NSIntersectionRange(lineRange, covered).length > 0 else { return }
+            guard NSIntersectionRange(lineRange, self.activeLineCharRange).length == 0 else { return }
+            guard let sub, !sub.isEmpty else { return }
+            // Bookkeeping properties (added::/completed::/id::) vanish
+            // entirely — the rendered view never showed them either.
+            if LiveMarkdown.isBookkeepingPropertyLine(sub) {
+                hidden.append(lineRange)
+                return
+            }
+            hidden.append(contentsOf: LiveMarkdown.hiddenRanges(line: sub, offset: lineRange.location))
+        }
+        return hidden
+    }
+}
+
+extension EditorTextView: NSLayoutManagerDelegate {
+    /// Hides syntax glyphs (away from the caret's line) by nulling them:
+    /// null glyphs draw nothing and take no space, while the characters —
+    /// and therefore saves, undo, and caret/IME machinery — stay intact.
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
+        properties: UnsafePointer<NSLayoutManager.GlyphProperty>,
+        characterIndexes: UnsafePointer<Int>,
+        font: NSFont,
+        forGlyphRange glyphRange: NSRange
+    ) -> Int {
+        func storeDefaults() {
+            layoutManager.setGlyphs(glyphs, properties: properties, characterIndexes: characterIndexes, font: font, forGlyphRange: glyphRange)
+        }
+        guard liveMarkdownEnabled, glyphRange.length > 0 else {
+            storeDefaults()
+            return glyphRange.length
+        }
+        let charRange = NSRange(location: characterIndexes[0],
+                                length: characterIndexes[glyphRange.length - 1] - characterIndexes[0] + 1)
+        let hidden = hiddenRanges(forCharacterRange: charRange)
+        guard !hidden.isEmpty else {
+            storeDefaults()
+            return glyphRange.length
+        }
+        var props = Array(UnsafeBufferPointer(start: properties, count: glyphRange.length))
+        for i in 0..<glyphRange.length {
+            let charIndex = characterIndexes[i]
+            if hidden.contains(where: { charIndex >= $0.location && charIndex < NSMaxRange($0) }) {
+                props[i].insert(.null)
+            }
+        }
+        props.withUnsafeBufferPointer { buffer in
+            layoutManager.setGlyphs(glyphs, properties: buffer.baseAddress!, characterIndexes: characterIndexes, font: font, forGlyphRange: glyphRange)
+        }
+        return glyphRange.length
+    }
+
+    /// Fully hidden bookkeeping lines (`added::` etc., away from the caret)
+    /// collapse to zero height — null glyphs only remove their width, and
+    /// the blank stripe they left between tasks read as stray spacing. The
+    /// caret entering the line re-expands it (refreshActiveLineHiding
+    /// invalidates that line's layout, so this runs again un-collapsed).
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<CGRect>,
+        lineFragmentUsedRect: UnsafeMutablePointer<CGRect>,
+        baselineOffset: UnsafeMutablePointer<CGFloat>,
+        in textContainer: NSTextContainer,
+        forGlyphRange glyphRange: NSRange
+    ) -> Bool {
+        if liveMarkdownEnabled, glyphRange.length > 0 {
+            let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            let s = string as NSString
+            if charRange.location < s.length {
+                let lineRange = s.lineRange(for: NSRange(location: charRange.location, length: 0))
+                let line = s.substring(with: lineRange)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if LiveMarkdown.isBookkeepingPropertyLine(line),
+                   NSIntersectionRange(lineRange, activeLineCharRange).length == 0 {
+                    lineFragmentRect.pointee.size.height = 0
+                    lineFragmentUsedRect.pointee.size.height = 0
+                }
+            }
+        }
+        return true
     }
 }
 

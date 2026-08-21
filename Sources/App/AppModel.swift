@@ -8,7 +8,6 @@ final class AppModel {
 
     var store: VaultStore?
     var loadedDays: Int = 60
-    var editingDay: Date?
     var scrollToDay: Date?
     var openPage: PageRef?
     var carrySummary: CarryResult?
@@ -112,7 +111,6 @@ final class AppModel {
         store.reload()
         self.store = store
         loadedDays = 60
-        editingDay = nil
         lastAppliedDay = nil
         // Deadlines live in defaults + a markdown mirror inside the vault;
         // pick up hand-edited entries from the file before seeding today.

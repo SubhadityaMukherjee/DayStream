@@ -11,6 +11,7 @@ final class AppSettings {
     private enum Keys {
         static let fontDesign = "daystream.fontDesign"
         static let fontSize = "daystream.fontSize"
+        static let liveMarkdown = "daystream.liveMarkdownRendering"
         static let syncTodos = "daystream.syncTodosAcrossNotes"
         static let autoCarry = "daystream.autoCarryForward"
     static let carryOnNewDate = "daystream.carryForwardOnNewDate"
@@ -79,6 +80,11 @@ final class AppSettings {
     var fontSize: Double {
         didSet { UserDefaults.standard.set(fontSize, forKey: Keys.fontSize) }
     }
+    /// Editor live preview: markdown syntax hides on lines away from the
+    /// caret (glyph-level; the raw text never changes).
+    var liveMarkdownRendering: Bool {
+        didSet { UserDefaults.standard.set(liveMarkdownRendering, forKey: Keys.liveMarkdown) }
+    }
     /// Toggling a task rewrites matching tasks in every other note.
     var syncTodosAcrossNotes: Bool {
         didSet { UserDefaults.standard.set(syncTodosAcrossNotes, forKey: Keys.syncTodos) }
@@ -145,6 +151,7 @@ final class AppSettings {
         let d = UserDefaults.standard
         self.fontDesign = d.object(forKey: Keys.fontDesign) as? Int ?? 0
         self.fontSize = d.object(forKey: Keys.fontSize) as? Double ?? 15
+        self.liveMarkdownRendering = d.object(forKey: Keys.liveMarkdown) as? Bool ?? true
         self.syncTodosAcrossNotes = d.object(forKey: Keys.syncTodos) as? Bool ?? true
         self.autoCarryForward = d.object(forKey: Keys.autoCarry) as? Bool ?? true
         self.carryForwardOnNewDate = d.object(forKey: Keys.carryOnNewDate) as? Bool ?? true
