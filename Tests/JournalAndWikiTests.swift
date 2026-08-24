@@ -62,4 +62,34 @@ final class WikiNameTests: XCTestCase {
         XCTAssertFalse(file.contains(":"))
         XCTAssertFalse(file.contains("?"))
     }
+
+    func testLinkURLOpensPage() {
+        let url = WikiName.linkURL(forWikilink: "Architecture Notes")!
+        XCTAssertEqual(url.scheme, "daystream")
+        XCTAssertEqual(url.host, "page")
+        let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "name" })?.value
+        XCTAssertEqual(name, "Architecture Notes")
+    }
+
+    func testLinkURLEncodesHostileCharacters() {
+        let url = WikiName.linkURL(forWikilink: "Research: ideas?")!
+        let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?.first(where: { $0.name == "name" })?.value
+        XCTAssertEqual(name, "Research: ideas?")
+    }
+
+    func testLinkURLRoutesDateLikeNamesToDay() {
+        for name in ["2026-08-18", "Aug 18th, 2026", "18 Aug 2026"] {
+            let url = WikiName.linkURL(forWikilink: name)!
+            XCTAssertEqual(url.host, "date", "\(name) should route to a day")
+            let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "value" })?.value
+            XCTAssertEqual(value, "2026-08-18")
+        }
+    }
+
+    func testLinkURLNilForEmptyName() {
+        XCTAssertNil(WikiName.linkURL(forWikilink: ""))
+    }
 }

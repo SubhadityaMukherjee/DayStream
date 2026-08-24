@@ -48,12 +48,10 @@ struct MarkdownText: View {
                 result += chunk
             case .wiki(let name):
                 var link = AttributedString(name)
-                // Date-like wikilinks ([[Aug 18th, 2026]], [[2026-08-18]]) jump
-                // to that day in the stream; everything else opens the page.
-                if let day = WikiDate.parse(name) {
-                    link.link = URL(string: "daystream://date?value=" + Self.isoDayFormatter.string(from: day))
-                } else {
-                    link.link = URL(string: "daystream://page?name=" + encodeName(name))
+                // Date-like wikilinks and pages both route through the same
+                // daystream:// URL the editor's clickable links use.
+                if let url = WikiName.linkURL(forWikilink: name) {
+                    link.link = url
                 }
                 link.foregroundColor = Color.readableLink
                 link.underlineStyle = .single
@@ -64,17 +62,6 @@ struct MarkdownText: View {
             }
         }
         return result
-    }
-
-    private static let isoDayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    private func encodeName(_ name: String) -> String {
-        name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
     }
 
     private func parseMarkdown(_ raw: String) -> AttributedString {

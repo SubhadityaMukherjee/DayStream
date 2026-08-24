@@ -7,6 +7,7 @@ struct PageView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     let pageName: String
 
     @State private var loaded = false
@@ -48,6 +49,7 @@ struct PageView: View {
                         onSaveCommit: {
                             saveAndNormalize()
                         },
+                        onOpenLink: { openURL($0) },
                         onTodoToggled: { taskContent, nowDone in
                             guard settings.syncTodosAcrossNotes, let url = pageURL else { return }
                             appModel.store?.syncTodoState(taskContent: taskContent,
