@@ -10,6 +10,7 @@ import SwiftUI
 struct DaySectionView: View {
     @Environment(AppModel.self) private var appModel
     @Environment(AppSettings.self) private var settings
+    @Environment(\.openURL) private var openURL
     let day: JournalDay
     let store: VaultStore
 
@@ -200,6 +201,7 @@ struct DaySectionView: View {
             onSaveCommit: {
                 saveAndNormalize()
             },
+            onOpenLink: { openURL($0) },
             onTodoToggled: { taskContent, nowDone in
                 guard settings.syncTodosAcrossNotes, let file = editFile else { return }
                 store.syncTodoState(taskContent: taskContent,

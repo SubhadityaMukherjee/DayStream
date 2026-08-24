@@ -35,6 +35,10 @@ struct MarkdownEditorView: NSViewRepresentable {
     var onTextChanged: ((String) -> Void)? = nil
     var onCommit: (() -> Void)? = nil
     var onSaveCommit: (() -> Void)? = nil
+    /// ⌘-click on a `[[wikilink]]` (or a `[label](url)` with a real URL)
+    /// fires this with the `daystream://`/http URL; callers route it through
+    /// the environment's openURL action (MainView handles daystream://).
+    var onOpenLink: ((URL) -> Void)? = nil
     /// Fired after ⌘⏎ toggles a line's marker: the task content (text minus
     /// bullet/marker) and whether it is now done. Callers echo the state to
     /// matching tasks in other notes via `VaultStore.syncTodoState`.
@@ -72,6 +76,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.onCommit = onCommit
         tv.onSaveCommit = onSaveCommit
         tv.onTodoToggled = onTodoToggled
+        tv.onOpenLink = onOpenLink
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
         tv.highlight()
@@ -110,6 +115,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.onCommit = onCommit
         tv.onSaveCommit = onSaveCommit
         tv.onTodoToggled = onTodoToggled
+        tv.onOpenLink = onOpenLink
         tv.imageImporter = imageImporter
         tv.pageNamesProvider = pageNamesProvider
 
@@ -210,6 +216,22 @@ struct MarkdownEditorView: NSViewRepresentable {
             guard let tv = notification.object as? EditorTextView else { return }
             tv.refreshActiveLineHiding()
         }
+
+        /// ⌘-click on a link-attributed range (AppKit requires ⌘ in editable
+        /// text views): route the URL to the caller, which hands it to the
+        /// environment's openURL action.
+        func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+            guard let tv = textView as? EditorTextView else { return false }
+            let url: URL?
+            switch link {
+            case let u as URL: url = u
+            case let s as String: url = URL(string: s)
+            default: url = nil
+            }
+            guard let url else { return false }
+            tv.onOpenLink?(url)
+            return true
+        }
     }
 }
 
@@ -265,6 +287,7 @@ final class EditorTextView: NSTextView {
     var onCommit: (() -> Void)?
     var onSaveCommit: (() -> Void)?
     var onTodoToggled: ((_ taskContent: String, _ nowDone: Bool) -> Void)?
+    var onOpenLink: ((URL) -> Void)?
     var imageImporter: ((Data, String?) -> String?)? = nil
     var pageNamesProvider: (() -> [String])? = nil
     private var suggest: WikiSuggestController?
@@ -1089,7 +1112,22 @@ final class EditorTextView: NSTextView {
                 }
             }
         }
-        paint(LiveMarkdown.wikilinkRegex, [.foregroundColor: NSColor.readableLink])
+        // Wikilinks — link-colored, underlined, and ⌘-clickable: the
+        // daystream:// URL routes through MainView's openURL action, same
+        // as the old rendered links. The hidden [[ ]] glyphs keep the
+        // attribute, so the visible name is the click target.
+        LiveMarkdown.wikilinkRegex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
+            guard let match else { return }
+            var attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.readableLink,
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+            ]
+            let inner = NSRange(location: match.range.location + 2, length: match.range.length - 4)
+            if inner.length > 0, let url = WikiName.linkURL(forWikilink: s.substring(with: inner)) {
+                attrs[.link] = url
+            }
+            storage.addAttributes(attrs, range: match.range)
+        }
         paint(LiveMarkdown.codeSpanRegex, [
             .font: mono,
             .foregroundColor: NSColor.systemBrown,
@@ -1115,16 +1153,28 @@ final class EditorTextView: NSTextView {
         }
 
         // Markdown links: label reads as a link; brackets and URL hide
-        // when the line is away from the caret (see LiveMarkdown).
+        // when the line is away from the caret (see LiveMarkdown). Real
+        // http(s)/daystream destinations are ⌘-clickable like wikilinks.
         LiveMarkdown.linkRegex.enumerateMatches(in: s as String, range: lineRange) { match, _, _ in
             guard let match else { return }
-            let matchText = s.substring(with: match.range)
-            let close = (matchText as NSString).range(of: "]")
+            let matchText = s.substring(with: match.range) as NSString
+            let close = matchText.range(of: "]")
             guard close.location != NSNotFound, close.location >= 2 else { return }
-            storage.addAttributes([
+            var attrs: [NSAttributedString.Key: Any] = [
                 .foregroundColor: NSColor.readableLink,
                 .underlineStyle: NSUnderlineStyle.single.rawValue,
-            ], range: NSRange(location: match.range.location + 1, length: close.location - 1))
+            ]
+            // "(url)" runs from after "]" to the last char before ")".
+            if close.location + 2 < matchText.length - 1 {
+                let dest = matchText.substring(
+                    with: NSRange(location: close.location + 2, length: matchText.length - close.location - 3))
+                let lower = dest.lowercased()
+                if lower.hasPrefix("http://") || lower.hasPrefix("https://") || lower.hasPrefix("daystream://"),
+                   let url = URL(string: dest) {
+                    attrs[.link] = url
+                }
+            }
+            storage.addAttributes(attrs, range: NSRange(location: match.range.location + 1, length: close.location - 1))
         }
     }
 
@@ -1326,6 +1376,12 @@ extension EditorTextView {
 
     /// Re-derives the active line from the selection and regenerates glyphs
     /// for the lines whose visibility flipped. Cheap: two line ranges.
+    /// The selection only drives the active line while this text view is the
+    /// first responder — dormant editors have no line under edit, so every
+    /// line renders live (checkboxes, hidden syntax). Otherwise a stale
+    /// caret pins one line raw forever: recurring/deadline tasks prepend at
+    /// the top of a note whose editor was created empty (caret 0), and the
+    /// pushed text adopts that dead position.
     func refreshActiveLineHiding() {
         guard let layoutManager, let storage = textStorage else { return }
         guard storage.length > 0 else {
@@ -1335,7 +1391,9 @@ extension EditorTextView {
         let s = storage.string as NSString
         let loc = min(selectedRange().location, s.length)
         let len = min(selectedRange().length, s.length - loc)
-        let newActive = s.lineRange(for: NSRange(location: loc, length: len))
+        let newActive = window?.firstResponder === self
+            ? s.lineRange(for: NSRange(location: loc, length: len))
+            : NSRange(location: 0, length: 0)
         guard !NSEqualRanges(newActive, activeLineCharRange) else { return }
 
         for r in [activeLineCharRange, newActive] where r.length > 0 && r.location < s.length {

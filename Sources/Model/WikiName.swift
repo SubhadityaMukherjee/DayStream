@@ -43,6 +43,31 @@ enum WikiName {
         [fileName(for: pageName), pageName + ".md"]
     }
 
+    // MARK: - Wikilink routing
+
+    private static let isoDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// The `daystream://` URL a clicked wikilink routes to: date-like names
+    /// (`[[Aug 18th, 2026]]`, `[[2026-08-18]]`) jump to that day in the
+    /// stream, everything else opens the page. MainView's openURL action
+    /// is the single consumer, so rendered views and the editor can't drift.
+    static func linkURL(forWikilink name: String) -> URL? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        if let day = WikiDate.parse(trimmed) {
+            return URL(string: "daystream://date?value=" + isoDayFormatter.string(from: day))
+        }
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
+            return nil
+        }
+        return URL(string: "daystream://page?name=" + encoded)
+    }
+
     // MARK: - Wikilink scanning
 
     private static let wikilinkRegex = try? NSRegularExpression(pattern: "\\[\\[([^\\[\\]]+)\\]\\]")
