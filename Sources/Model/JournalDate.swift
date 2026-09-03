@@ -21,16 +21,31 @@ enum JournalDate {
         return out
     }()
 
+    /// Precompiled filename-shape patterns: `=~~` compiled a fresh ICU regex
+    /// per call, which dominated `date(fromFilename:)` on large vaults.
+    private static let nameShapes: [(regex: NSRegularExpression, format: String)] = [
+        "^[0-9]{4}-[0-9]{2}-[0-9]{2}$": "yyyy-MM-dd",
+        "^[0-9]{4}_[0-9]{2}_[0-9]{2}$": "yyyy_MM_dd",
+        "^[0-9]{2}-[0-9]{2}-[0-9]{4}$": "dd-MM-yyyy",
+    ].compactMap { pattern, format in
+        (try? NSRegularExpression(pattern: pattern)).map { ($0, format) }
+    }
+
+    static func matchesShape(_ filename: String, format: String) -> Bool {
+        let name = (filename as NSString).deletingPathExtension
+        let full = NSRange(location: 0, length: (name as NSString).length)
+        return nameShapes.contains { shape in
+            shape.format == format && shape.regex.firstMatch(in: name, range: full) != nil
+        }
+    }
+
     static func date(fromFilename filename: String) -> Date? {
         let name = (filename as NSString).deletingPathExtension
-        let format: String
-        switch true {
-        case name =~~ "^[0-9]{4}-[0-9]{2}-[0-9]{2}$": format = "yyyy-MM-dd"
-        case name =~~ "^[0-9]{4}_[0-9]{2}_[0-9]{2}$": format = "yyyy_MM_dd"
-        case name =~~ "^[0-9]{2}-[0-9]{2}-[0-9]{4}$": format = "dd-MM-yyyy"
-        default: return nil
-        }
-        guard let df = utcFormatters[format] else { return nil }
+        let ns = name as NSString
+        let format: String? = nameShapes.first { shape in
+            shape.regex.firstMatch(in: name, range: NSRange(location: 0, length: ns.length)) != nil
+        }?.format
+        guard let format, let df = utcFormatters[format] else { return nil }
         guard let date = df.date(from: name) else { return nil }
         // Reject impossible dates like 13-45-2026 that DateFormatters can rubber-stamp.
         return df.string(from: date) == name ? date : nil
@@ -48,16 +63,25 @@ enum JournalDate {
     /// previous day in UTC+ zones), and the name must match the calendar
     /// day the user means. Parsing (`date(fromFilename:)`) stays UTC-based
     /// so file names always round-trip to the same day key.
+    ///
+    /// Local-day filename formatters, cached per current timezone (rebuilt
+    /// if the system timezone changes). `allFilenames` runs per search hit,
+    /// per mention and per `ensureDayFile`, so per-call DateFormatter
+    /// allocation was a measurable cost.
+    private static var localFormatters: (timezone: TimeZone, formatters: [DateFormatter])?
+
     static func allFilenames(for date: Date) -> [String] {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "en_US_POSIX")
-        df.timeZone = TimeZone.current
-        var out: [String] = []
-        for format in ["yyyy-MM-dd", "yyyy_MM_dd", "dd-MM-yyyy"] {
-            df.dateFormat = format
-            out.append(df.string(from: date) + ".md")
+        let tz = TimeZone.current
+        if localFormatters?.timezone != tz {
+            localFormatters = (tz, ["yyyy-MM-dd", "yyyy_MM_dd", "dd-MM-yyyy"].map { format in
+                let df = DateFormatter()
+                df.locale = Locale(identifier: "en_US_POSIX")
+                df.timeZone = tz
+                df.dateFormat = format
+                return df
+            })
         }
-        return out
+        return localFormatters!.formatters.map { $0.string(from: date) + ".md" }
     }
 
     static func isJournalFilename(_ filename: String) -> Bool {

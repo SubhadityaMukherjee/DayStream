@@ -1,4 +1,5 @@
 import Foundation
+import CoreServices
 import Observation
 
 struct VaultFile {
@@ -18,9 +19,14 @@ struct VaultFile {
 struct JournalDay: Identifiable {
     let date: Date
     var files: [VaultFile]
+    /// Cached at parse/refresh time — the calendar reads this for every
+    /// visible cell, and walking every block of every file per access was
+    /// O(total blocks) per SwiftUI evaluation.
+    private(set) var hasOpenTodos = false
 
     var id: Date { date }
-    var hasOpenTodos: Bool {
+
+    mutating func refreshOpenTodos() {
         var found = false
         func walk(_ nodes: [Block]) {
             for n in nodes {
@@ -29,7 +35,7 @@ struct JournalDay: Identifiable {
             }
         }
         files.forEach { walk($0.blocks) }
-        return found
+        hasOpenTodos = found
     }
 
     /// The file editing and saving target: prefers a content-bearing file so an
@@ -61,7 +67,47 @@ final class VaultStore {
 
     var onExternalChange: (() -> Void)?
 
-    private var watchers: [DispatchSourceFileSystemObject] = []
+    /// Last vault I/O failure (failed save/delete), surfaced once by the UI
+    /// and cleared there. Set on the main thread only.
+    private(set) var storageErrorMessage: String?
+
+    func clearStorageError() {
+        storageErrorMessage = nil
+    }
+
+    private func reportError(_ message: String) {
+        storageErrorMessage = message
+    }
+
+    private func writeToFile(_ text: String, url: URL) {
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            // Disk writes happen on writeQueue; hop to main for the
+            // observable property.
+            DispatchQueue.main.async { [weak self] in
+                self?.reportError("Couldn't save \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Deletes a file, reporting failures (permissions, read-only vault)
+    /// instead of silently leaving the file on disk. Returns an error
+    /// message on failure, nil on success.
+    @discardableResult
+    func removeFile(at url: URL) -> String? {
+        do {
+            try FileManager.default.removeItem(at: url)
+            return nil
+        } catch {
+            let message = "Couldn't delete \(url.lastPathComponent): \(error.localizedDescription)"
+            reportError(message)
+            return message
+        }
+    }
+
+    private var fsStream: FSEventStreamRef?
+
     private var reloadWorkItem: DispatchWorkItem?
     /// Skip watcher reloads briefly after our own writes (they'd be redundant).
     private var lastSelfWrite: Date?
@@ -120,14 +166,16 @@ final class VaultStore {
             let day = JournalDate.startOfDay(date)
             byDay[day, default: []].append(VaultFile(url: url, date: day, text: text))
         }
-        let newDays = byDay.map { day, files in
+        var newDays = byDay.map { day, files in
             // Same date in multiple filename formats: newest convention first.
             let f = files.sorted {
                 let ar = $0.url.journalFormatRank
                 let br = $1.url.journalFormatRank
                 return ar == br ? $0.url.lastPathComponent < $1.url.lastPathComponent : ar < br
             }
-            return JournalDay(date: day, files: f)
+            var d = JournalDay(date: day, files: f)
+            d.refreshOpenTodos()
+            return d
         }
         .sorted { $0.date > $1.date }
 
@@ -167,7 +215,12 @@ final class VaultStore {
                 // Discard a snapshot that raced one of our own writes — those
                 // already refreshed the store with newer content, and
                 // applying the snapshot would revert it under the editor.
-                guard self.writeGeneration == generation else { return }
+                // But our writes don't cover *other* files' external
+                // changes, so re-enqueue instead of dropping the reload.
+                guard self.writeGeneration == generation else {
+                    self.scheduleReload()
+                    return
+                }
                 self.applySnapshot(days: snap.days, pageCount: snap.pageCount)
                 self.onExternalChange?()
             }
@@ -213,10 +266,13 @@ final class VaultStore {
     func write(text: String, to url: URL) {
         writeGeneration += 1
         lastSelfWrite = Date()
-        // Drain in-flight async typing saves first so this newer write can
-        // never be overtaken on disk by an older queued one.
-        writeQueue.sync {}
-        try? text.write(to: url, atomically: true, encoding: .utf8)
+        // The write itself runs inside the queue: an async typing save
+        // enqueued after this call can never overtake it on disk (the old
+        // drain-then-write-on-caller had that ordering hole), and the disk
+        // I/O stays off the caller's thread.
+        writeQueue.sync {
+            writeToFile(text, url: url)
+        }
         refresh(fileURL: url, newText: text)
     }
 
@@ -228,12 +284,43 @@ final class VaultStore {
         let generation = writeGeneration
         lastSelfWrite = Date()
         writeQueue.async { [weak self] in
-            try? text.write(to: url, atomically: true, encoding: .utf8)
+            self?.writeToFile(text, url: url)
             let day = JournalDate.startOfDay(url.dateFromJournalName ?? Date())
             let file = VaultFile(url: url, date: day, text: text)
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.writeGeneration == generation else { return }
+                guard let self, self.writeGeneration == generation else {
+                    // Superseded by a newer write to this file: disk already
+                    // holds the newer text, but `days` never saw ours —
+                    // adopt via a reload instead of dropping it.
+                    self?.scheduleReload()
+                    return
+                }
                 self.applyRefresh(file)
+            }
+        }
+    }
+
+    /// Serial off-main batch write (cross-note todo echo): one generation
+    /// bump, disk writes on the write queue, then an in-place refresh per
+    /// file on the main thread — N files cost one main-thread hop, not N
+    /// blocking writes.
+    private func writeBatch(_ updates: [(url: URL, text: String)]) {
+        writeGeneration += 1
+        let generation = writeGeneration
+        lastSelfWrite = Date()
+        writeQueue.async { [weak self] in
+            for update in updates {
+                self?.writeToFile(update.text, url: update.url)
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                guard self.writeGeneration == generation else {
+                    self.scheduleReload()
+                    return
+                }
+                for update in updates {
+                    self.refresh(fileURL: update.url, newText: update.text)
+                }
             }
         }
     }
@@ -245,12 +332,24 @@ final class VaultStore {
     }
 
     private func applyRefresh(_ file: VaultFile) {
-        guard let dayIndex = days.firstIndex(where: { $0.date == file.date }) else {
-            reload()
+        // Page (and any non-journal) writes must not trigger a full vault
+        // reload — that re-read and re-parsed everything on every debounced
+        // page save. Pages aren't part of `days`; only derived page state
+        // needs invalidating. (Path comparison, not URL equality: trailing-
+        // slash conventions differ between the two URL constructions.)
+        let parent = file.url.deletingLastPathComponent().standardizedFileURL.path
+        let journals = journalsURL.standardizedFileURL.path
+        guard parent == journals || parent == journals + "/" else {
+            pageNamesCache = nil
             return
         }
-        if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == file.url }) {
-            days[dayIndex].files[fileIndex] = file
+        if let dayIndex = days.firstIndex(where: { $0.date == file.date }) {
+            if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == file.url }) {
+                days[dayIndex].files[fileIndex] = file
+                days[dayIndex].refreshOpenTodos()
+            } else {
+                reload()
+            }
         } else {
             reload()
         }
@@ -275,31 +374,31 @@ final class VaultStore {
     func syncTodoState(taskContent: String, to target: TodoState, excluding editedURL: URL) {
         let key = BlockTree.normalize(taskContent)
         guard !key.isEmpty else { return }
-        // Snapshot candidates on the main thread, then match/rewrite off-main so
-        // a click never stalls the UI on large vaults; results are applied back
-        // on the main thread.
-        var others: [(url: URL, text: String)] = []
+        // Snapshot journal text (value copies) and page URLs on the main
+        // thread; page files are read inside the sync queue so the main
+        // thread never blocks on disk, and the echo writes land as one
+        // off-main batch.
+        var journalPairs: [(url: URL, text: String)] = []
         for day in days {
             for f in day.files where f.url != editedURL {
-                others.append((f.url, f.text))
+                journalPairs.append((f.url, f.text))
             }
         }
-        for url in pageFileURLs() {
-            others.append((url, pageText(at: url)))
-        }
+        let pages = pageFileURLs().filter { $0 != editedURL }
         syncQueue.async { [weak self] in
+            var candidates = journalPairs
+            for url in pages {
+                candidates.append((url, (try? String(contentsOf: url, encoding: .utf8)) ?? ""))
+            }
             var updates: [(url: URL, text: String)] = []
-            for other in others {
-                if let synced = BlockTree.syncedText(other.text, key: key, to: target) {
-                    updates.append((other.url, synced))
+            for candidate in candidates {
+                if let synced = BlockTree.syncedText(candidate.text, key: key, to: target) {
+                    updates.append((candidate.url, synced))
                 }
             }
             guard !updates.isEmpty else { return }
             DispatchQueue.main.async {
-                guard let self else { return }
-                for update in updates {
-                    self.write(text: update.text, to: update.url)
-                }
+                self?.writeBatch(updates)
             }
         }
     }
@@ -364,35 +463,83 @@ final class VaultStore {
     // MARK: - Page name index (wikilink autocomplete)
 
     private var pageNamesCache: (names: [String], at: Date)?
+    private var pageNamesRefreshInFlight = false
 
     /// Every page name that exists or is referenced anywhere in the vault:
     /// files in pages/ plus all `[[wikilink]]` targets in journals and pages.
-    /// Short-TTL cache; invalidated on reload.
+    /// Stale-while-revalidate: a warm cache serves instantly (the `[[`
+    /// autocomplete runs per keystroke) and expiry refreshes in the
+    /// background instead of re-reading every page from disk on main.
     func allPageNames() -> [String] {
-        if let cache = pageNamesCache, Date().timeIntervalSince(cache.at) < 5 {
+        if let cache = pageNamesCache {
+            if Date().timeIntervalSince(cache.at) >= 5 {
+                refreshPageNamesInBackground()
+            }
             return cache.names
         }
-        var names = Set<String>()
-        for url in pageFileURLs() {
-            names.insert(WikiName.pageName(for: url.lastPathComponent))
-        }
-        for day in days {
-            for file in day.files {
-                for target in WikiName.wikilinkTargets(in: file.text) {
-                    names.insert(target)
-                }
+        let names = Self.computePageNames(journals: journalSnapshots(), pages: pageSnapshots())
+        pageNamesCache = (names, Date())
+        return names
+    }
+
+    private func refreshPageNamesInBackground() {
+        guard !pageNamesRefreshInFlight else { return }
+        pageNamesRefreshInFlight = true
+        let journals = journalSnapshots()
+        let pageURLs = pageFileURLs()
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let pages = pageURLs.map { url in
+                (url: url, title: WikiName.pageName(for: url.lastPathComponent),
+                 text: (try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            }
+            let names = Self.computePageNames(journals: journals, pages: pages)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.pageNamesRefreshInFlight = false
+                self.pageNamesCache = (names, Date())
             }
         }
-        for url in pageFileURLs() {
-            for target in WikiName.wikilinkTargets(in: pageText(at: url)) {
+    }
+
+    private static func computePageNames(
+        journals: [(url: URL, date: Date, title: String, text: String)],
+        pages: [(url: URL, title: String, text: String)]
+    ) -> [String] {
+        var names = Set<String>()
+        for p in pages {
+            names.insert(p.title)
+            for target in WikiName.wikilinkTargets(in: p.text) {
                 names.insert(target)
             }
         }
-        let sorted = names
+        for j in journals {
+            for target in WikiName.wikilinkTargets(in: j.text) {
+                names.insert(target)
+            }
+        }
+        return names
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        pageNamesCache = (sorted, Date())
-        return sorted
+    }
+
+    // MARK: - Snapshot helpers (main thread)
+
+    /// Value-copied journal content + precomputed titles: everything the
+    /// vault-wide scans (search, mentions, page names) need, snapshotted
+    /// on the main thread so the scans themselves can run anywhere.
+    private func journalSnapshots() -> [(url: URL, date: Date, title: String, text: String)] {
+        days.flatMap { day in
+            day.files.map { file in
+                (url: file.url, date: day.date,
+                 title: JournalDate.filename(for: day.date), text: file.text)
+            }
+        }
+    }
+
+    private func pageSnapshots() -> [(url: URL, title: String, text: String)] {
+        pageFileURLs().map { url in
+            (url: url, title: WikiName.pageName(for: url.lastPathComponent), text: pageText(at: url))
+        }
     }
 
     // MARK: - Vault-wide search
@@ -403,8 +550,62 @@ final class VaultStore {
         let date: Date?
         let title: String
         let lineText: String
-        var id: String { url.absoluteString + ":" + lineText }
+        /// Page-name match: the title itself matched, no preview line.
+        var isTitleMatch = false
+        /// 1-based line number in the file — keeps ids unique when the same
+        /// line text appears twice (two identical `- TODO` bullets).
+        var lineNumber = 0
+        var id: String { url.absoluteString + ":" + String(lineNumber) }
         var isPage: Bool { date == nil }
+    }
+
+    /// Pure scan over snapshotted content; runs on any thread. Case-
+    /// insensitive `range(of:)` — no lowercased copy of every line.
+    private static func scanForHits(
+        query: String,
+        journals: [(url: URL, date: Date, title: String, text: String)],
+        pages: [(url: URL, title: String, text: String)],
+        limit: Int
+    ) -> [SearchHit] {
+        var out: [SearchHit] = []
+        for journal in journals {
+            var lineNo = 0
+            for line in journal.text.components(separatedBy: "\n") {
+                lineNo += 1
+                if line.range(of: query, options: .caseInsensitive) != nil {
+                    out.append(SearchHit(
+                        url: journal.url,
+                        date: journal.date,
+                        title: journal.title,
+                        lineText: line.trimmingCharacters(in: .whitespaces),
+                        lineNumber: lineNo
+                    ))
+                    if out.count >= limit { return out }
+                }
+            }
+        }
+        for page in pages {
+            if page.title.range(of: query, options: .caseInsensitive) != nil {
+                out.append(SearchHit(
+                    url: page.url, date: nil, title: page.title,
+                    lineText: page.title, isTitleMatch: true
+                ))
+                if out.count >= limit { return out }
+            }
+            var lineNo = 0
+            for line in page.text.components(separatedBy: "\n") {
+                lineNo += 1
+                if line.range(of: query, options: .caseInsensitive) != nil {
+                    out.append(SearchHit(
+                        url: page.url, date: nil, title: page.title,
+                        lineText: line.trimmingCharacters(in: .whitespaces),
+                        lineNumber: lineNo
+                    ))
+                    if out.count >= limit { return out }
+                }
+            }
+        }
+        return out
     }
 
     /// Case-insensitive substring search across every journal and page line.
@@ -413,44 +614,24 @@ final class VaultStore {
     func search(_ rawQuery: String, limit: Int = 100) -> [SearchHit] {
         let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
-        let lower = query.lowercased()
-        var out: [SearchHit] = []
+        return Self.scanForHits(query: query, journals: journalSnapshots(),
+                                pages: pageSnapshots(), limit: limit)
+    }
 
-        for day in days {
-            for file in day.files {
-                for line in file.text.components(separatedBy: "\n") {
-                    if line.lowercased().contains(lower) {
-                        out.append(SearchHit(
-                            url: file.url,
-                            date: day.date,
-                            title: JournalDate.filename(for: day.date),
-                            lineText: line.trimmingCharacters(in: .whitespaces)
-                        ))
-                        if out.count >= limit { return out }
-                    }
-                }
+    /// Background variant for the interactive search field: snapshot on the
+    /// caller's (main) thread, scan + page file reads off-main.
+    func searchAsync(_ rawQuery: String, limit: Int = 100) async -> [SearchHit] {
+        let query = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        let journals = journalSnapshots()
+        let pageURLs = pageFileURLs()
+        return await Task.detached(priority: .userInitiated) {
+            let pages = pageURLs.map { url in
+                (url: url, title: WikiName.pageName(for: url.lastPathComponent),
+                 text: (try? String(contentsOf: url, encoding: .utf8)) ?? "")
             }
-        }
-
-        for url in pageFileURLs() {
-            let name = WikiName.pageName(for: url.lastPathComponent)
-            if name.lowercased().contains(lower) {
-                out.append(SearchHit(
-                    url: url, date: nil, title: name, lineText: "Page"
-                ))
-                if out.count >= limit { return out }
-            }
-            for line in pageText(at: url).components(separatedBy: "\n") {
-                if line.lowercased().contains(lower) {
-                    out.append(SearchHit(
-                        url: url, date: nil, title: name,
-                        lineText: line.trimmingCharacters(in: .whitespaces)
-                    ))
-                    if out.count >= limit { return out }
-                }
-            }
-        }
-        return out
+            return Self.scanForHits(query: query, journals: journals, pages: pages, limit: limit)
+        }.value
     }
 
     // MARK: - Carry forward
@@ -528,15 +709,19 @@ final class VaultStore {
         /// All lines of the matching block's subtree — the block's real text
         /// on that day, children included (capped).
         var blockLines: [String] = []
-        var id: String { url.absoluteString + ":" + lineText }
+        /// 1-based line number of the block — keeps ids unique when the same
+        /// wikilink bullet appears twice in one file.
+        var lineNumber = 0
+        var id: String { url.absoluteString + ":" + String(lineNumber) }
     }
 
-    /// Every block in the vault (journals + pages) that links to `[[pageName]]`.
-    func mentions(of pageName: String) -> [Mention] {
-        let target = pageName.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !target.isEmpty else { return [] }
+    /// Pure collect over snapshotted content; runs on any thread.
+    private static func collectMentions(
+        of target: String,
+        journals: [(url: URL, date: Date, title: String, text: String)],
+        pages: [(url: URL, title: String, text: String)]
+    ) -> [Mention] {
         var out: [Mention] = []
-
         func collect(_ url: URL, date: Date?, title: String, text: String) {
             for root in BlockTree.parse(text) {
                 func walk(_ b: Block) {
@@ -546,7 +731,8 @@ final class VaultStore {
                             date: date,
                             title: title,
                             lineText: line.trimmingCharacters(in: .whitespaces),
-                            blockLines: BlockTree.subtreeLines(b, maxLines: 8)
+                            blockLines: BlockTree.subtreeLines(b, maxLines: 8),
+                            lineNumber: b.lineIndex + 1
                         ))
                     }
                     b.children.forEach(walk)
@@ -554,19 +740,39 @@ final class VaultStore {
                 walk(root)
             }
         }
-
-        for day in days {
-            for file in day.files {
-                collect(file.url, date: day.date, title: JournalDate.filename(for: day.date), text: file.text)
-            }
+        for journal in journals {
+            collect(journal.url, date: journal.date, title: journal.title, text: journal.text)
         }
-        for url in pageFileURLs() {
+        for page in pages {
             // Skip the page's own file: it isn't a reference to itself.
-            let name = url.deletingPathExtension().lastPathComponent
-            if name.lowercased() == WikiName.fileName(for: target).lowercased() { continue }
-            collect(url, date: nil, title: WikiName.pageName(for: url.lastPathComponent), text: pageText(at: url))
+            let stem = page.url.deletingPathExtension().lastPathComponent
+            if stem.lowercased() == WikiName.fileName(for: target).lowercased() { continue }
+            collect(page.url, date: nil, title: page.title, text: page.text)
         }
         return out
+    }
+
+    /// Every block in the vault (journals + pages) that links to `[[pageName]]`.
+    func mentions(of pageName: String) -> [Mention] {
+        let target = pageName.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !target.isEmpty else { return [] }
+        return Self.collectMentions(of: target, journals: journalSnapshots(), pages: pageSnapshots())
+    }
+
+    /// Background variant for the page sheet: snapshot on main, parse every
+    /// journal and page off-main.
+    func mentionsAsync(of pageName: String) async -> [Mention] {
+        let target = pageName.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !target.isEmpty else { return [] }
+        let journals = journalSnapshots()
+        let pageURLs = pageFileURLs()
+        return await Task.detached(priority: .userInitiated) {
+            let pages = pageURLs.map { url in
+                (url: url, title: WikiName.pageName(for: url.lastPathComponent),
+                 text: (try? String(contentsOf: url, encoding: .utf8)) ?? "")
+            }
+            return Self.collectMentions(of: target, journals: journals, pages: pages)
+        }.value
     }
 
     // MARK: - Maintenance
@@ -754,24 +960,49 @@ final class VaultStore {
 
     // MARK: - File watching
 
+    /// One FSEvents stream with per-file events over the vault root: a
+    /// plain directory-fd `.write` watch only signals directory-entry
+    /// changes (create/delete/rename), so an external editor modifying an
+    /// existing journal in place was invisible. File events cover every
+    /// subdirectory (journals/, pages/, assets/) in one source.
     private func installWatchers() {
-        guard watchers.isEmpty else { return }
-        // In .journalsDirectory layout the vault URL *is* the journals URL;
-        // dedupe so the same directory isn't watched twice.
-        for dir in Set([journalsURL, pagesURL, vaultURL]) {
-            let fd = open(dir.path, O_EVTONLY)
-            guard fd >= 0 else { continue }
-            let source = DispatchSource.makeFileSystemObjectSource(
-                fileDescriptor: fd,
-                eventMask: [.write, .rename, .delete],
-                queue: DispatchQueue.global(qos: .utility)
-            )
-            source.setEventHandler { [weak self] in
-                self?.scheduleReload()
+        guard fsStream == nil else { return }
+        var context = FSEventStreamContext()
+        context.version = 0
+        context.info = Unmanaged.passUnretained(self).toOpaque()
+        let callback: FSEventStreamCallback = { _, info, count, _, eventFlags, _ in
+            guard let info else { return }
+            let store = Unmanaged<VaultStore>.fromOpaque(info).takeUnretainedValue()
+            let interesting: UInt32 = UInt32(kFSEventStreamEventFlagItemModified)
+                | UInt32(kFSEventStreamEventFlagItemRenamed)
+                | UInt32(kFSEventStreamEventFlagItemRemoved)
+                | UInt32(kFSEventStreamEventFlagItemCreated)
+                | UInt32(kFSEventStreamEventFlagRootChanged)
+                | UInt32(kFSEventStreamEventFlagMustScanSubDirs)
+            for i in 0..<count where eventFlags[i] & interesting != 0 {
+                store.scheduleReload()
+                return
             }
-            source.setCancelHandler { close(fd) }
-            source.resume()
-            watchers.append(source)
+        }
+        guard let stream = FSEventStreamCreate(
+            kCFAllocatorDefault,
+            callback,
+            &context,
+            [vaultRootURL.path] as CFArray,
+            FSEventStreamEventId(kFSEventStreamEventIdSinceNow),
+            0.25,
+            UInt32(kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer)
+        ) else { return }
+        FSEventStreamSetDispatchQueue(stream, DispatchQueue.global(qos: .utility))
+        FSEventStreamStart(stream)
+        fsStream = stream
+    }
+
+    deinit {
+        if let fsStream {
+            FSEventStreamStop(fsStream)
+            FSEventStreamInvalidate(fsStream)
+            FSEventStreamRelease(fsStream)
         }
     }
 
@@ -780,15 +1011,16 @@ final class VaultStore {
             guard let self else { return }
             // Our own writes already refreshed the store in place; a watcher
             // reload right after would only duplicate work (and flicker).
-            if let last = self.lastSelfWrite, Date().timeIntervalSince(last) < 0.8 {
-                return
-            }
+            // The event isn't dropped, though — it is delayed past the
+            // suppression window, so an external change that landed under
+            // the same window is still adopted.
+            let suppressed = self.lastSelfWrite.map { Date().timeIntervalSince($0) < 0.8 } ?? false
             self.reloadWorkItem?.cancel()
             let item = DispatchWorkItem { [weak self] in
                 self?.reloadAsync()
             }
             self.reloadWorkItem = item
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: item)
+            DispatchQueue.main.asyncAfter(deadline: .now() + (suppressed ? 1.0 : 0.6), execute: item)
         }
     }
 }
@@ -806,9 +1038,9 @@ private extension URL {
     }
     /// 0 = ISO (new convention), 1 = yyyy_MM_dd, 2 = dd-MM-yyyy (legacy, day-first).
     var journalFormatRank: Int {
-        let n = (lastPathComponent as NSString).deletingPathExtension
-        if n =~~ "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" { return 0 }
-        if n =~~ "^[0-9]{4}_[0-9]{2}_[0-9]{2}$" { return 1 }
+        let stem = (lastPathComponent as NSString).deletingPathExtension
+        if JournalDate.matchesShape(stem, format: "yyyy-MM-dd") { return 0 }
+        if JournalDate.matchesShape(stem, format: "yyyy_MM_dd") { return 1 }
         return 2
     }
 }

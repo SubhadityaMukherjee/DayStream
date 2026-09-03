@@ -4,22 +4,30 @@ import Foundation
 /// auto-formatting (consistent tabs/bullets/linebreaks, block spacing),
 /// and human-readable durations for finished tasks.
 enum NoteFormatter {
-    static let timestampFormat = "yyyy-MM-dd HH:mm"
+    /// Legacy stamp format (local time, DST-ambiguous). Kept only for
+    /// parsing old notes; new stamps are UTC ISO8601.
+    static let legacyTimestampFormat = "yyyy-MM-dd HH:mm"
 
-    private static func stampFormatter() -> DateFormatter {
+    /// Cached once — `parseTimestamp` runs per DONE task on every editor
+    /// decoration rebuild (i.e. every keystroke), and DateFormatter is one
+    /// of the most expensive objects in Foundation to create.
+    private static let legacyStampFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = .current
-        f.dateFormat = timestampFormat
+        f.dateFormat = legacyTimestampFormat
         return f
-    }
+    }()
+
+    private static let isoStampFormatter = ISO8601DateFormatter()
 
     static func timestamp(_ date: Date) -> String {
-        stampFormatter().string(from: date)
+        isoStampFormatter.string(from: date)
     }
 
     static func parseTimestamp(_ s: String) -> Date? {
-        stampFormatter().date(from: s.trimmingCharacters(in: .whitespaces))
+        let t = s.trimmingCharacters(in: .whitespaces)
+        return isoStampFormatter.date(from: t) ?? legacyStampFormatter.date(from: t)
     }
 
     // MARK: - Durations

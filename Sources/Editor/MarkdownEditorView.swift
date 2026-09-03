@@ -9,7 +9,7 @@ import AppKit
 /// - ⌘S auto-formats and saves via `onSaveCommit` (callers normalize text first)
 /// - ⌘K links the selection (URL on the clipboard -> `[text](url)`, else `[[wikilink]]`)
 /// - ⌘⏎ toggles the current line's TODO/DONE marker (sync handled by caller)
-/// - ⇧⏎ inserts a new TODO below the current line
+/// - ⇧⏎ inserts a new TODO below the current line (with an `added::` stamp)
 /// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
 /// - Live preview: markdown syntax renders and hides on lines away from the
@@ -391,9 +391,9 @@ final class EditorTextView: NSTextView {
         applyExternalText(pending)
     }
 
-    private var slashMarkers: [String: String] {
-        ["/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE"]
-    }
+    private static let slashMarkers: [String: String] = [
+        "/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE",
+    ]
 
     // MARK: - Keyboard plumbing
 
@@ -406,6 +406,13 @@ final class EditorTextView: NSTextView {
         let isBare = modifiers.isEmpty || modifiers == .function
 
         if event.keyCode == Keyboard.space, isBare {
+            // Only claim space while we're the active first responder — a
+            // materialized (dormant) editor must never swallow the key from
+            // whoever actually has focus (the local monitor below gates the
+            // same way).
+            guard window?.firstResponder === self else {
+                return super.performKeyEquivalent(with: event)
+            }
             insertText(" ", replacementRange: selectedRange())
             return true
         }
@@ -610,11 +617,9 @@ final class EditorTextView: NSTextView {
         for (from, to) in markers where rest.hasPrefix(from) {
             if let r = line.range(of: from) {
                 let nsr = NSRange(r, in: line)
-                shouldChangeText(in: lineRange, replacementString: line)
-                textStorage?.replaceCharacters(
-                    in: NSRange(location: lineRange.location + nsr.location, length: nsr.length),
-                    with: to
-                )
+                let absRange = NSRange(location: lineRange.location + nsr.location, length: nsr.length)
+                shouldChangeText(in: absRange, replacementString: to)
+                textStorage?.replaceCharacters(in: absRange, with: to)
                 didChangeText()
                 if to == "DONE" {
                     stampCompletion(lineStart: lineRange.location)
@@ -628,7 +633,7 @@ final class EditorTextView: NSTextView {
         let bulletOffset = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
         let insertAt = lineRange.location + bulletOffset + 2
         guard line.count - bulletOffset >= 2 else { return }
-        shouldChangeText(in: lineRange, replacementString: line)
+        shouldChangeText(in: NSRange(location: insertAt, length: 0), replacementString: "TODO ")
         textStorage?.replaceCharacters(
             in: NSRange(location: insertAt, length: 0),
             with: "TODO "
@@ -644,7 +649,12 @@ final class EditorTextView: NSTextView {
     /// editor-toggled tasks.
     private func stampCompletion(lineStart: Int) {
         let s = string as NSString
-        let lineIndex = s.substring(to: lineStart).components(separatedBy: "\n").count - 1
+        // Line number without copying/splitting the whole prefix.
+        var lineIndex = 0
+        s.enumerateSubstrings(
+            in: NSRange(location: 0, length: min(lineStart, s.length)),
+            options: [.byLines, .substringNotRequired]
+        ) { _, _, _, _ in lineIndex += 1 }
         let stamped = NoteFormatter.withCompletionStamp(s as String, blockLineIndex: lineIndex, at: Date())
         guard stamped != s as String else { return }
         applyExternalText(stamped)
@@ -757,7 +767,9 @@ final class EditorTextView: NSTextView {
     /// ⇧⏎: a fresh TODO directly below the current line (regardless of
     /// where the caret sits on it), inheriting the line's indent, caret
     /// ready to type. Insert after the line's newline so an existing next
-    /// line is pushed down, not split.
+    /// line is pushed down, not split. The `added::` stamp matches what
+    /// ⌘N / addTask write, so duration badges work from the start; it
+    /// renders collapsed (a bookkeeping line) while the caret is elsewhere.
     private func insertTodoBelowCurrentLine() {
         let s = string as NSString
         let caret = selectedRange().location
@@ -765,10 +777,11 @@ final class EditorTextView: NSTextView {
         let lineText = s.substring(with: lineRange)
         let indent = String(lineText.prefix { $0 == "\t" || $0 == " " })
         let insertion = indent + "- TODO \n"
+            + indent + "\tadded:: " + NoteFormatter.timestamp(Date()) + "\n"
         let target = NSMaxRange(lineRange)
         insertText(insertion, replacementRange: NSRange(location: target, length: 0))
-        // One before the end: after "TODO ", before the newline we added.
-        selectedRange = NSRange(location: target + (insertion as NSString).length - 1, length: 0)
+        // Right after "- TODO " — before the stamp line.
+        selectedRange = NSRange(location: target + (indent as NSString).length + 7, length: 0)
         scrollRangeToVisible(selectedRange)
     }
 
@@ -860,7 +873,7 @@ final class EditorTextView: NSTextView {
             if caret > 0 {
                 let scanStart = max(0, caret - 16)
                 let window = s.substring(with: NSRange(location: scanStart, length: caret - scanStart))
-                for (slash, marker) in slashMarkers {
+                for (slash, marker) in Self.slashMarkers {
                     if window.hasSuffix(slash) {
                         let replaceLen = slash.count
                         let wordStart = caret - replaceLen
@@ -977,15 +990,15 @@ final class EditorTextView: NSTextView {
 
     // MARK: - Syntax highlighting
 
-    private var markerColors: [String: NSColor] {
-        [
-            "TODO": .systemOrange,
-            "DOING": NSColor.readableLink,
-            "LATER": .systemPurple,
-            "NOW": .systemRed,
-            "DONE": .systemGreen,
-        ]
-    }
+    // Allocated once — styleLine runs per line per highlight pass and the
+    // dictionary literal per call was pure overhead.
+    private static let markerColors: [String: NSColor] = [
+        "TODO": .systemOrange,
+        "DOING": NSColor.readableLink,
+        "LATER": .systemPurple,
+        "NOW": .systemRed,
+        "DONE": .systemGreen,
+    ]
 
     /// Patterns are line-local (`\n` excluded) and live in LiveMarkdown,
     /// shared with the live-preview hider so styling and hiding always
@@ -1038,15 +1051,19 @@ final class EditorTextView: NSTextView {
 
     /// Fence edits change the styling of *following* lines, which the
     /// line-local pass can't know about. A short idle pass over the whole
-    /// document reconciles those (and is cheap: no regex compilation).
+    /// document reconciles those — but only when a fence count actually
+    /// changed: styling is line-local otherwise, so the full pass is pure
+    /// waste after ordinary keystrokes.
     private func scheduleHighlightReconcile() {
+        let fenceCountAtSchedule = fenceLineCount
         highlightReconcileTask?.cancel()
         highlightReconcileTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.highlight()
-                self?.reconcileFenceDrivenHiding()
+                guard let self, self.fenceLineCount != fenceCountAtSchedule else { return }
+                self.highlight()
+                self.reconcileFenceDrivenHiding()
             }
         }
     }
@@ -1135,7 +1152,7 @@ final class EditorTextView: NSTextView {
         // TODO-family markers on bullet lines.
         if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
             let afterBullet = trimmed.dropFirst(2)
-            for (marker, color) in markerColors {
+            for (marker, color) in Self.markerColors {
                 if afterBullet.hasPrefix(marker + " ") || afterBullet == marker {
                     // Indent is tabs/spaces only, so scalar and UTF-16 counts
                     // agree here.
@@ -1249,7 +1266,11 @@ final class EditorTextView: NSTextView {
             return
         }
         if decorationsDirty { rebuildDecorations() }
-        checkboxRects = []
+        // Full redraws rebuild the click-target list; partial ones (AppKit
+        // redraw clips) only repaint intersecting decorations and keep the
+        // last full list — rects for unchanged regions stay valid.
+        let fullRedraw = dirtyRect.isEmpty || dirtyRect.contains(bounds)
+        if fullRedraw { checkboxRects = [] }
         let s = string as NSString
         let baseFont = font ?? .systemFont(ofSize: 14)
 
@@ -1261,6 +1282,13 @@ final class EditorTextView: NSTextView {
             guard glyphRange.length > 0 else { continue }
             let fragment = layoutManager.lineFragmentRect(
                 forGlyphAt: glyphRange.location, effectiveRange: nil)
+            if !fullRedraw {
+                // Fragment rects are container-space; shift to view space to
+                // test against the dirty region.
+                let viewFragment = fragment.offsetBy(
+                    dx: textContainerInset.width, dy: textContainerInset.height)
+                guard viewFragment.intersects(dirtyRect) else { continue }
+            }
 
             // Content start x: first glyph after the hidden prefix.
             let line = s.substring(with: deco.lineRange)
@@ -1278,7 +1306,9 @@ final class EditorTextView: NSTextView {
 
             if deco.marker != nil {
                 let box = drawCheckbox(in: fragment, contentX: contentX, done: deco.marker == "DONE")
-                checkboxRects.append((box, deco.lineRange))
+                if fullRedraw {
+                    checkboxRects.append((box, deco.lineRange))
+                }
             } else {
                 drawBulletDash(contentX: contentX, fragment: fragment, baseFont: baseFont)
             }

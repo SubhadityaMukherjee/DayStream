@@ -85,8 +85,11 @@ final class GlobalHotkeyManager {
         return table[keyCode]
     }
 
-    /// Registers `spec`, replacing any previous registration.
-    func register(spec: AppSettings.HotkeySpec, handler: @escaping () -> Void) {
+    /// Registers `spec`, replacing any previous registration. Returns false
+    /// when registration failed (typically another app owns the combo) so
+    /// Settings can say so instead of the shortcut silently not working.
+    @discardableResult
+    func register(spec: AppSettings.HotkeySpec, handler: @escaping () -> Void) -> Bool {
         unregister()
         installEventHandlerIfNeeded()
         let id = EventHotKeyID(signature: Self.fourCC, id: hotkeyID)
@@ -97,9 +100,10 @@ final class GlobalHotkeyManager {
                                          GetApplicationEventTarget(),
                                          0,
                                          &ref)
-        guard status == noErr, ref != nil else { return }
+        guard status == noErr, let ref else { return false }
         hotKeyRef = ref
         self.handler = handler
+        return true
     }
 
     func unregister() {

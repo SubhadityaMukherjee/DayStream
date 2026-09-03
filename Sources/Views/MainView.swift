@@ -61,10 +61,30 @@ struct MainView: View {
         } message: {
             Text(appModel.gitBackupResult?.message ?? "")
         }
+        .alert(
+            "Vault Error",
+            isPresented: Binding(
+                get: { appModel.store?.storageErrorMessage != nil },
+                set: { if !$0 { appModel.store?.clearStorageError() } }
+            )
+        ) {
+            Button("OK") { appModel.store?.clearStorageError() }
+        } message: {
+            Text(appModel.store?.storageErrorMessage ?? "")
+        }
         .onAppear {
             appModel.goToToday()
         }
     }
+
+    /// POSIX formatter for daystream://date links; per-link allocation was
+    /// pure waste in a deep-link hot path.
+    private static let linkDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     private func handleInternalURL(_ url: URL) -> Bool {
         guard url.scheme == "daystream" else { return false }
@@ -77,10 +97,7 @@ struct MainView: View {
             }
         case "date":
             if let value = comps?.queryItems?.first(where: { $0.name == "value" })?.value {
-                let f = DateFormatter()
-                f.locale = Locale(identifier: "en_US_POSIX")
-                f.dateFormat = "yyyy-MM-dd"
-                if let date = f.date(from: value) {
+                if let date = Self.linkDayFormatter.date(from: value) {
                     let target = JournalDate.startOfDay(date)
                     // If a page sheet is open, close it and reveal once the
                     // dismissal completes; otherwise reveal right away.
@@ -196,6 +213,12 @@ private struct SidebarView: View {
             }
         }
         .padding(.top, 16)
+        .onChange(of: settings.gitBackupEnabled) { _, _ in
+            appModel.refreshGitBackupAvailability()
+        }
+        .onChange(of: settings.gitBackupPath) { _, _ in
+            appModel.refreshGitBackupAvailability()
+        }
         .sheet(isPresented: $showNewDeadline) {
             NewDeadlineSheet()
                 .frame(minWidth: 380, minHeight: 240)
@@ -341,6 +364,8 @@ struct FloatingSearchView: View {
     @State private var expanded = false
     @State private var query = ""
     @State private var hits: [VaultStore.SearchHit] = []
+    /// Keyboard-selected hit (↑/↓ in the field); nil = top match on ⏎.
+    @State private var selection: Int?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -417,11 +442,11 @@ struct FloatingSearchView: View {
             field
             if !hits.isEmpty {
                 Divider().padding(.vertical, 4)
-                ForEach(hits.prefix(8)) { hit in
-                    row(hit)
+                ForEach(Array(hits.prefix(8).enumerated()), id: \.element.id) { index, hit in
+                    row(hit, index: index)
                 }
                 if hits.count > 8 {
-                    Text("\(hits.count - 8) more — press ⏎ for the top match")
+                    Text("\(hits.count - 8) more — press ⏎ for the selected match")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 10)
@@ -450,11 +475,17 @@ struct FloatingSearchView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($focused)
-                .onSubmit { openFirstHit() }
+                .onSubmit { openSelectedHit() }
+                // Keyboard navigation while the field holds focus: ↑/↓ pick
+                // a hit, ⏎ opens it. Handled here (not via key monitors) so
+                // the events only ever apply to this field.
+                .onKeyPress(.upArrow) { moveSelection(-1) }
+                .onKeyPress(.downArrow) { moveSelection(1) }
             if !query.isEmpty {
                 Button {
                     query = ""
                     hits = []
+                    selection = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
@@ -470,23 +501,27 @@ struct FloatingSearchView: View {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
                 hits = []
+                selection = nil
                 return
             }
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            hits = appModel.store?.search(trimmed, limit: 20) ?? []
+            // Off-main scan: the vault-wide search used to hitch the whole
+            // UI on every keystroke pause with a large vault.
+            hits = await appModel.store?.searchAsync(trimmed, limit: 20) ?? []
+            selection = nil
         }
     }
 
-    private func row(_ hit: VaultStore.SearchHit) -> some View {
+    private func row(_ hit: VaultStore.SearchHit, index: Int) -> some View {
         Button {
             open(hit)
         } label: {
             VStack(alignment: .leading, spacing: 1) {
-                Text(hit.isPage ? "Page · \(hit.title)" : Self.dayFormatter.string(from: hit.date!))
+                Text(hit.isPage ? "Page · \(hit.title)" : hit.date.map { Self.dayFormatter.string(from: $0) } ?? hit.title)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
-                if hit.lineText != "Page" {
+                if !hit.isTitleMatch {
                     Text(hit.lineText)
                         .font(.system(size: 12.5))
                         .lineLimit(1)
@@ -497,9 +532,25 @@ struct FloatingSearchView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
+            .background(selection == index ? Color.accentColor.opacity(0.12) : .clear)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+
+    private func moveSelection(_ delta: Int) -> KeyPress.Result {
+        guard !hits.isEmpty else { return .ignored }
+        let current = selection ?? 0
+        selection = min(max(current + delta, 0), min(hits.count, 8) - 1)
+        return .handled
+    }
+
+    private func openSelectedHit() {
+        if let selection, hits.indices.contains(selection) {
+            open(hits[selection])
+        } else {
+            openFirstHit()
+        }
     }
 
     private func openFirstHit() {

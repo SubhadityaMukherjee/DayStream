@@ -21,7 +21,9 @@ struct PageView: View {
     /// External text to push into the live editor (⌘S normalization).
     @State private var pushedText: String?
     @State private var mentions: [VaultStore.Mention] = []
+    @State private var mentionsTask: Task<Void, Never>?
     @State private var confirmDelete = false
+    @State private var deleteError: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,6 +70,17 @@ struct PageView: View {
             }
         }
         .frame(minWidth: 560, minHeight: 460)
+        .alert(
+            "Delete Failed",
+            isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            )
+        ) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
+        }
         .onAppear {
             guard !loaded else { return }
             loaded = true
@@ -76,7 +89,7 @@ struct PageView: View {
                 pageURL = url
                 session.text = url.map { store.pageText(at: $0) } ?? ""
                 session.base = session.text
-                refreshMentions()
+                scheduleMentionsRefresh()
             }
         }
         .onDisappear {
@@ -100,9 +113,8 @@ struct PageView: View {
                     confirmDelete = true
                 } label: {
                     Image(systemName: "trash")
-                        .foregroundStyle(.red)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.roundIcon(.red))
                 .help("Delete this empty page")
                 .confirmationDialog(
                     "Delete the empty page “\(pageName)”?",
@@ -125,14 +137,19 @@ struct PageView: View {
     }
 
     /// ⌘S: normalize the draft, write it, and push the normalized text back
-    /// into the editor (caret kept).
+    /// into the editor (caret kept). Writes directly — save() would skip
+    /// the write since base was just set to the normalized text.
     private func saveAndNormalize() {
         session.cancelSave()
+        guard let store = appModel.store,
+              let url = pageURL ?? store.pageURL(named: pageName, createIfMissing: true) else { return }
         let normalized = NoteFormatter.normalizedForSave(session.text, isToday: false, now: Date())
         session.text = normalized
         session.base = normalized
         pushedText = normalized
-        save()
+        store.write(text: normalized, to: url)
+        isDirty = false
+        scheduleMentionsRefresh()
     }
 
     private var pageTextIsEmpty: Bool? {
@@ -202,9 +219,20 @@ struct PageView: View {
         }
     }
 
-    private func refreshMentions() {
-        guard let store = appModel.store else { return }
-        mentions = store.mentions(of: pageName)
+    private func scheduleMentionsRefresh() {
+        // Separate from the save debounce: linked references recompute
+        // (off-main, in the store) a beat after typing settles, without
+        // gating the save itself.
+        mentionsTask?.cancel()
+        mentionsTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let name = pageName
+            let store = appModel.store
+            let result = await store?.mentionsAsync(of: name) ?? []
+            guard !Task.isCancelled else { return }
+            mentions = result
+        }
     }
 
     // MARK: - Saving / deletion
@@ -222,18 +250,22 @@ struct PageView: View {
         guard let store = appModel.store else { return }
         let url = pageURL ?? store.pageURL(named: pageName, createIfMissing: true)
         guard let url else { return }
-        let current = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-        if current != session.text {
-            store.write(text: session.text, to: url)
-            isDirty = false
-            refreshMentions()
-        }
+        // session.base tracks the last-synced file text — no disk re-read
+        // on every debounced save just to detect "no change".
+        guard session.text != session.base else { return }
+        store.write(text: session.text, to: url)
+        session.base = session.text
+        isDirty = false
+        scheduleMentionsRefresh()
     }
 
     private func deleteEmptyPage() {
         guard let store = appModel.store, let url = pageURL else { return }
         session.cancelSave()
-        try? FileManager.default.removeItem(at: url)
+        if let message = store.removeFile(at: url) {
+            deleteError = message
+            return
+        }
         store.reload()
         dismiss()
     }

@@ -276,7 +276,16 @@ enum BlockTree {
     /// Returns the file text with the given block's todo state flipped.
     static func toggledFileText(_ text: String, blockLineIndex: Int) -> String {
         var lines = text.components(separatedBy: "\n")
-        guard lines.indices.contains(blockLineIndex) else { return text }
+        toggleBlock(&lines, blockLineIndex: blockLineIndex)
+        return lines.joined(separator: "\n")
+    }
+
+    /// In-place flip of one block's todo state inside a line array — shared
+    /// by `toggledFileText` (single flip) and `syncedText` (batched: one
+    /// split/join for the whole file instead of one per matched block).
+    /// Line count never changes, so collected line indices stay valid.
+    private static func toggleBlock(_ lines: inout [String], blockLineIndex: Int) {
+        guard lines.indices.contains(blockLineIndex) else { return }
         let line = lines[blockLineIndex]
 
         if let bullet = parseBullet(line), bullet.marker != nil {
@@ -284,7 +293,7 @@ enum BlockTree {
             let new = old == "DONE" ? "TODO" : "DONE"
             if let r = line.range(of: old) {
                 lines[blockLineIndex] = line.replacingCharacters(in: r, with: new)
-                return lines.joined(separator: "\n")
+                return
             }
         }
 
@@ -307,12 +316,11 @@ enum BlockTree {
                     let trailing = afterSeparator.drop { $0 != " " }
                     let newTail = String(trailing)
                     lines[j] = lead + "Status:: " + flipped + newTail
-                    return lines.joined(separator: "\n")
+                    return
                 }
             }
             j += 1
         }
-        return text
     }
 
     // MARK: - Cross-note todo syncing
@@ -326,9 +334,10 @@ enum BlockTree {
         // Cheap prefilter: normalization only lowercases, collapses whitespace
         // and trims edge punctuation, so every word of the key must appear
         // (lowercased) verbatim in the raw text. Skip parsing when it doesn't.
+        // Case-insensitive range search — no full lowercased copy per file.
         guard let probe = key.components(separatedBy: " ").filter({ !$0.isEmpty })
             .max(by: { $0.count < $1.count }) else { return nil }
-        guard text.lowercased().contains(probe) else { return nil }
+        guard text.range(of: probe, options: .caseInsensitive) != nil else { return nil }
 
         var lineIndices: [Int] = []
         func walk(_ nodes: [Block]) {
@@ -342,16 +351,14 @@ enum BlockTree {
         walk(parse(text))
         guard !lineIndices.isEmpty else { return nil }
 
-        var current = text
-        var changed = false
+        // One split for the whole file; edits are line-in-place so indices
+        // hold no matter how many blocks matched.
+        var lines = text.components(separatedBy: "\n")
         for idx in lineIndices {
-            let updated = toggledFileText(current, blockLineIndex: idx)
-            if updated != current {
-                current = updated
-                changed = true
-            }
+            toggleBlock(&lines, blockLineIndex: idx)
         }
-        return changed ? current : nil
+        let out = lines.joined(separator: "\n")
+        return out == text ? nil : out
     }
 
     // MARK: - Carry-forward helpers

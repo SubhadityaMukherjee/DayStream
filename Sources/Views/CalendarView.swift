@@ -7,19 +7,26 @@ struct CalendarView: View {
 
     private var calendar: Calendar {
         var c = Calendar(identifier: .gregorian)
-        c.firstWeekday = 1 // Sunday, matching the vault's :start-of-week 6
+        // Respect the user's week start (Monday-first locales got a US grid
+        // with the old hardcoded Sunday).
+        c.firstWeekday = Calendar.current.firstWeekday
         return c
     }
 
-    private var monthTitle: String {
+    private static let monthTitleFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "MMMM yyyy"
-        return f.string(from: displayedMonth)
+        return f
+    }()
+
+    private var monthTitle: String {
+        Self.monthTitleFormatter.string(from: displayedMonth)
     }
 
     private var daysWithNotes: [Date: Bool] {
         guard let store = appModel.store else { return [:] }
-        var out: [Date: Bool] = [:]
+        var out = [Date: Bool]()
+        out.reserveCapacity(store.days.count)
         for day in store.days {
             out[day.date] = day.hasOpenTodos
         }
@@ -27,7 +34,10 @@ struct CalendarView: View {
     }
 
     var body: some View {
-        VStack(spacing: 6) {
+        // One dict build per render — dayCell used to walk every day per
+        // cell (dozens of full-vault scans per calendar render).
+        let notes = daysWithNotes
+        return VStack(spacing: 6) {
             HStack {
                 Button {
                     moveMonth(-1)
@@ -35,6 +45,8 @@ struct CalendarView: View {
                     Image(systemName: "chevron.left")
                 }
                 .buttonStyle(.plain)
+                .help("Previous month")
+                .accessibilityLabel("Previous month")
                 Spacer()
                 Button {
                     showMonthPicker.toggle()
@@ -49,6 +61,7 @@ struct CalendarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("Jump to a month")
+                .accessibilityLabel("Jump to a month")
                 .popover(isPresented: $showMonthPicker, arrowEdge: .bottom) {
                     MonthYearPicker(month: displayedMonth, calendar: calendar) { picked in
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -64,10 +77,15 @@ struct CalendarView: View {
                     Image(systemName: "chevron.right")
                 }
                 .buttonStyle(.plain)
+                .help("Next month")
+                .accessibilityLabel("Next month")
             }
 
             HStack(spacing: 0) {
-                ForEach(weekdaySymbols, id: \.self) { sym in
+                // By offset, not \.self: locale symbols can repeat (and
+                // blank day cells share nil), which trips ForEach's
+                // duplicate-ID check.
+                ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, sym in
                     Text(sym)
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(.tertiary)
@@ -76,11 +94,11 @@ struct CalendarView: View {
             }
 
             let weeks = monthGrid()
-            ForEach(weeks, id: \.self) { week in
+            ForEach(Array(weeks.enumerated()), id: \.offset) { _, week in
                 HStack(spacing: 0) {
-                    ForEach(week, id: \.self) { date in
+                    ForEach(Array(week.enumerated()), id: \.offset) { _, date in
                         if let date {
-                            dayCell(date)
+                            dayCell(date, notes: notes)
                         } else {
                             Color.clear.frame(height: 30)
                         }
@@ -91,10 +109,10 @@ struct CalendarView: View {
     }
 
     @ViewBuilder
-    private func dayCell(_ date: Date) -> some View {
+    private func dayCell(_ date: Date, notes: [Date: Bool]) -> some View {
         let isToday = date == JournalDate.startOfDay(Date())
-        let openTodos = daysWithNotes[date] == true
-        let hasNote = daysWithNotes[date] != nil
+        let openTodos = notes[date] == true
+        let hasNote = notes[date] != nil
 
         Button {
             if hasNote {
@@ -126,6 +144,10 @@ struct CalendarView: View {
         }
         .buttonStyle(.plain)
         .help(hasNote ? "Jump to \(dateString(date))" : "Create a note for \(dateString(date))")
+        .accessibilityLabel("\(dateString(date))" + (hasNote
+            ? openTodos ? ", note with open tasks" : ", note"
+            : ", no note"))
+        .accessibilityAddTraits(.isButton)
     }
 
     private var weekdaySymbols: [String] {

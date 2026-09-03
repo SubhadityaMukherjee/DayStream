@@ -401,7 +401,7 @@ final class VaultTaskAndSearchTests: XCTestCase {
         let hits = store.search("eval")
         XCTAssertGreaterThanOrEqual(hits.count, 3)
         XCTAssertTrue(hits.contains { $0.date != nil && $0.lineText.contains("eval the model") })
-        XCTAssertTrue(hits.contains { $0.isPage && $0.title == "eval notes" && $0.lineText == "Page" })
+        XCTAssertTrue(hits.contains { $0.isPage && $0.title == "eval notes" && $0.isTitleMatch })
         XCTAssertTrue(hits.contains { $0.isPage && $0.lineText.contains("notes about eval") })
         XCTAssertTrue(store.search("nothing-matches-this").isEmpty)
     }

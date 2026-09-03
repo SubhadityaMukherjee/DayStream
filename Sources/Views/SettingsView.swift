@@ -381,6 +381,14 @@ private struct ShortcutsTab: View {
                 Text("From any app: opens DayStream and starts a new todo in today's note with the caret ready. Shortcuts must include ⌘, ⌥ or ⌃.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Registration conflicts (another app owns the combo) used to
+                // be silently dropped, leaving a shortcut that never fires.
+                if settings.globalQuickAddEnabled, settings.quickAddHotkey != nil,
+                   !GlobalHotkeyManager.shared.isRegistered {
+                    Label("This shortcut couldn't be registered — another app may be using it. Try a different combination.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("In DayStream") {
