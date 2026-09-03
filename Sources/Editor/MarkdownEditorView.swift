@@ -764,12 +764,35 @@ final class EditorTextView: NSTextView {
 
     // MARK: - Outliner behaviors
 
-    /// ⇧⏎: a fresh TODO directly below the current line (regardless of
-    /// where the caret sits on it), inheriting the line's indent, caret
-    /// ready to type. Insert after the line's newline so an existing next
-    /// line is pushed down, not split. The `added::` stamp matches what
-    /// ⌘N / addTask write, so duration badges work from the start; it
-    /// renders collapsed (a bookkeeping line) while the caret is elsewhere.
+    /// End of the block that starts at `lineRange`: skips the block's
+    /// property lines (`Key:: value`) and (optionally) indented child
+    /// lines, stopping at the next bullet, blank line or unindented text.
+    /// Inserts must land here — between blocks, never between a task and
+    /// its `added::`/`completed::` stamps (a stamp separated from its task
+    /// no longer counts as that task's metadata).
+    private func blockEnd(afterLine lineRange: NSRange, includeIndentedChildren: Bool) -> Int {
+        let s = string as NSString
+        var scan = NSMaxRange(lineRange)
+        while scan < s.length {
+            let next = s.lineRange(for: NSRange(location: scan, length: 0))
+            let line = s.substring(with: next)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { break }
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") { break }
+            let isProperty = line.range(of: #"^\s*[A-Za-z][A-Za-z0-9_-]*::"#, options: .regularExpression) != nil
+            let isIndented = line.first == "\t" || line.first == " "
+            if !isProperty && !(includeIndentedChildren && isIndented) { break }
+            scan = NSMaxRange(next)
+        }
+        return scan
+    }
+
+    /// ⇧⏎: a fresh TODO directly below the current line's *block*
+    /// (property lines and children stay attached to the task above),
+    /// inheriting the line's indent, caret ready to type. The `added::`
+    /// stamp matches what ⌘N / addTask write, so duration badges work from
+    /// the start; it renders collapsed (a bookkeeping line) while the caret
+    /// is elsewhere.
     private func insertTodoBelowCurrentLine() {
         let s = string as NSString
         let caret = selectedRange().location
@@ -778,7 +801,7 @@ final class EditorTextView: NSTextView {
         let indent = String(lineText.prefix { $0 == "\t" || $0 == " " })
         let insertion = indent + "- TODO \n"
             + indent + "\tadded:: " + NoteFormatter.timestamp(Date()) + "\n"
-        let target = NSMaxRange(lineRange)
+        let target = blockEnd(afterLine: lineRange, includeIndentedChildren: true)
         insertText(insertion, replacementRange: NSRange(location: target, length: 0))
         // Right after "- TODO " — before the stamp line.
         selectedRange = NSRange(location: target + (indent as NSString).length + 7, length: 0)
@@ -792,7 +815,8 @@ final class EditorTextView: NSTextView {
         }
         let s = string as NSString
         let caret = selectedRange().location
-        let lineStart = (s.lineRange(for: NSRange(location: min(caret, s.length), length: 0)).location)
+        let fullRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
+        let lineStart = fullRange.location
         let lineText = s.substring(with: NSRange(location: lineStart, length: caret - lineStart))
 
         let indentUnits = BlockTree.leadingWhitespaceUnits(lineText)
@@ -800,22 +824,38 @@ final class EditorTextView: NSTextView {
         let isEmptyBullet = afterIndent == "-" || afterIndent == "*"
 
         if isEmptyBullet {
-            // Exit the list: clear the empty bullet and insert a plain newline.
+            // Exit the list: clear the empty bullet (and any property lines
+            // that belonged to it, so no orphan `added::` survives) and
+            // insert a plain newline.
             // UTF-16 length: text before the caret can contain astral chars
             // (emoji), where Swift's scalar count diverges from NSString's.
-            let clearRange = NSRange(location: lineStart, length: (lineText as NSString).length)
+            let end = blockEnd(afterLine: fullRange, includeIndentedChildren: false)
+            let clearRange = NSRange(location: lineStart, length: end - lineStart)
             replaceCharacters(in: clearRange, with: "")
             super.insertNewline(sender)
             return
         }
-        // Continue numbered lists too: "- 1. foo" -> next "2.".
+        // A caret at the line's end continues the list *below the whole
+        // block* — inserting at the caret would split the task from its
+        // `added::`/`completed::` property lines (and any indented
+        // children), leaving the stamps attached to the wrong task.
+        // UTF-16 length: text before the caret can contain astral chars
+        // (emoji), where Swift's scalar count diverges from NSString's.
+        let atLineEnd = fullRange.length == 0 || caret == NSMaxRange(fullRange) - 1
+        let content: String
         if let number = trailingListNumber(lineText) {
-            let indent = String(repeating: "\t", count: indentUnits)
-            insertText("\n" + indent + "- \(number + 1). ", replacementRange: selectedRange())
-            return
+            // Continue numbered lists too: "- 1. foo" -> next "2.".
+            content = String(repeating: "\t", count: indentUnits) + "- \(number + 1). "
+        } else {
+            content = String(repeating: "\t", count: indentUnits) + "- "
         }
-        let indent = String(repeating: "\t", count: indentUnits)
-        insertText("\n" + indent + "- ", replacementRange: selectedRange())
+        if atLineEnd {
+            let target = blockEnd(afterLine: fullRange, includeIndentedChildren: true)
+            insertText(content + "\n", replacementRange: NSRange(location: target, length: 0))
+            selectedRange = NSRange(location: target + (content as NSString).length, length: 0)
+        } else {
+            insertText("\n" + content, replacementRange: selectedRange())
+        }
     }
 
     private func trailingListNumber(_ lineText: String) -> Int? {
