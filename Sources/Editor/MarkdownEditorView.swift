@@ -9,6 +9,7 @@ import AppKit
 /// - ⌘S auto-formats and saves via `onSaveCommit` (callers normalize text first)
 /// - ⌘K links the selection (URL on the clipboard -> `[text](url)`, else `[[wikilink]]`)
 /// - ⌘⏎ toggles the current line's TODO/DONE marker (sync handled by caller)
+/// - ⇧⏎ inserts a new TODO below the current line
 /// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
 /// - Live preview: markdown syntax renders and hides on lines away from the
@@ -417,8 +418,12 @@ final class EditorTextView: NSTextView {
             onSaveCommit?()
             return true
         }
-        if event.keyCode == Keyboard.returnKey, modifiers == .command {
+        if isTodoToggleEvent(event) {
             toggleTodoOnCurrentLine()
+            return true
+        }
+        if isTodoInsertEvent(event) {
+            if suggestionsShown { completeSelectedSuggestion() } else { insertTodoBelowCurrentLine() }
             return true
         }
         if event.keyCode == Keyboard.b, modifiers == .command {
@@ -439,6 +444,29 @@ final class EditorTextView: NSTextView {
         static let b: UInt16 = 11
         static let i: UInt16 = 34
         static let returnKey: UInt16 = 36
+        static let keypadEnter: UInt16 = 76
+    }
+
+    /// Return-key events carry a hidden `.function` flag in their modifier
+    /// flags (letter-key events don't — which is why `modifiers == .command`
+    /// worked for ⌘K but never for ⌘⏎), so match by membership, not equality.
+    private func isTodoToggleEvent(_ event: NSEvent) -> Bool {
+        guard event.keyCode == Keyboard.returnKey || event.keyCode == Keyboard.keypadEnter else { return false }
+        let m = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.command)
+            && !m.contains(.shift)
+            && !m.contains(.option)
+            && !m.contains(.control)
+    }
+
+    /// ⇧⏎ (⇧ + return or keypad enter, no other modifiers).
+    private func isTodoInsertEvent(_ event: NSEvent) -> Bool {
+        guard event.keyCode == Keyboard.returnKey || event.keyCode == Keyboard.keypadEnter else { return false }
+        let m = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.shift)
+            && !m.contains(.command)
+            && !m.contains(.option)
+            && !m.contains(.control)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -448,6 +476,18 @@ final class EditorTextView: NSTextView {
             } else {
                 onCommit?()
             }
+            return
+        }
+        // The key-equivalent phase above doesn't reliably win for return-key
+        // events inside the SwiftUI hierarchy (same story as the space key):
+        // the plain return binding claims them as insertNewline:. Intercept
+        // here, before interpretKeyEvents applies the binding.
+        if isTodoToggleEvent(event) {
+            toggleTodoOnCurrentLine()
+            return
+        }
+        if isTodoInsertEvent(event) {
+            if suggestionsShown { completeSelectedSuggestion() } else { insertTodoBelowCurrentLine() }
             return
         }
         super.keyDown(with: event)
@@ -713,6 +753,24 @@ final class EditorTextView: NSTextView {
     }
 
     // MARK: - Outliner behaviors
+
+    /// ⇧⏎: a fresh TODO directly below the current line (regardless of
+    /// where the caret sits on it), inheriting the line's indent, caret
+    /// ready to type. Insert after the line's newline so an existing next
+    /// line is pushed down, not split.
+    private func insertTodoBelowCurrentLine() {
+        let s = string as NSString
+        let caret = selectedRange().location
+        let lineRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
+        let lineText = s.substring(with: lineRange)
+        let indent = String(lineText.prefix { $0 == "\t" || $0 == " " })
+        let insertion = indent + "- TODO \n"
+        let target = NSMaxRange(lineRange)
+        insertText(insertion, replacementRange: NSRange(location: target, length: 0))
+        // One before the end: after "TODO ", before the newline we added.
+        selectedRange = NSRange(location: target + (insertion as NSString).length - 1, length: 0)
+        scrollRangeToVisible(selectedRange)
+    }
 
     override func insertNewline(_ sender: Any?) {
         if suggestionsShown {

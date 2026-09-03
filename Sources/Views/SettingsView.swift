@@ -394,6 +394,7 @@ private struct ShortcutsTab: View {
                 shortcutRow("⌘S", "Save and auto-format (stay in the note)")
                 shortcutRow("⎋", "Flush the pending save (closes a page)")
                 shortcutRow("⌘⏎ or the checkbox", "Toggle TODO / DONE on a task (syncs across notes)")
+                shortcutRow("⇧⏎", "New TODO below the current line")
                 shortcutRow("⌘K", "Link selection (clipboard URL → link, else [[wikilink]])")
                 shortcutRow("⌘B / ⌘I", "Bold / italic")
                 shortcutRow("⇥ / ⇧⇥", "Indent / outdent (or accept [[ autocomplete)")

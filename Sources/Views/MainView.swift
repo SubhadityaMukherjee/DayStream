@@ -337,6 +337,7 @@ private struct NewDeadlineSheet: View {
 /// Journals jump to their day; pages open in a sheet.
 struct FloatingSearchView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openSettings) private var openSettings
     @State private var expanded = false
     @State private var query = ""
     @State private var hits: [VaultStore.SearchHit] = []
@@ -348,7 +349,10 @@ struct FloatingSearchView: View {
                 panel
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            toggleButton
+            HStack(spacing: 10) {
+                shortcutsButton
+                toggleButton
+            }
         }
         .onChange(of: appModel.searchRequest) { _, _ in
             openPanel()
@@ -386,6 +390,24 @@ struct FloatingSearchView: View {
         .buttonStyle(.plain)
         .floatingPanelBackground(in: Circle())
         .help("Search all notes and pages (⌘F)")
+    }
+
+    /// Shortcut reference one hop away: opens Settings on the Shortcuts tab
+    /// (same landing pattern as the sidebar's Recurring Tasks…).
+    private var shortcutsButton: some View {
+        Button {
+            appModel.requestedSettingsTab = .shortcuts
+            openSettings()
+        } label: {
+            Image(systemName: "command")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, height: 40)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .floatingPanelBackground(in: Circle())
+        .help("Keyboard shortcuts")
     }
 
     /// Field + top matches in one glass panel. Content-sized: a "more" footer
