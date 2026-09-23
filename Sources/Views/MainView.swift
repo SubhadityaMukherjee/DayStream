@@ -599,8 +599,8 @@ struct FloatingSearchView: View {
 }
 
 /// Pinned green bubbles above the stream: open tasks in today's note and
-/// across every note in the vault. Counts come cached from `VaultStore`, so
-/// rendering never re-walks the days.
+/// across the last three months of notes. Per-day counts are cached in
+/// `VaultStore`, so rendering never re-walks the vault.
 private struct OpenTaskCounterView: View {
     @Environment(AppModel.self) private var appModel
     let store: VaultStore
@@ -628,7 +628,7 @@ private struct OpenTaskCounterView: View {
         .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
         .help(label == "Today"
               ? "\(count) open task\(count == 1 ? "" : "s") in today's note"
-              : "\(count) open task\(count == 1 ? "" : "s") across every note in the vault")
+              : "\(count) open task\(count == 1 ? "" : "s") across the last three months of notes")
         .onTapGesture {
             if label == "Today" { appModel.goToToday() }
         }

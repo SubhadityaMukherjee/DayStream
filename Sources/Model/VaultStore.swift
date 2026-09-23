@@ -72,14 +72,18 @@ final class VaultStore {
     let pagesURL: URL
     private(set) var days: [JournalDay] = []          // newest first
     private(set) var pageCount: Int = 0
-    /// Open tasks across every journal day, cached alongside `days` so the
-    /// stream's counter bubble never re-walks the vault per render.
-    private(set) var openTaskCountTotal = 0
-    /// Open tasks in today's note (0 when today has no note yet).
+    /// Distinct open tasks in today's note (same title twice = one task).
     var openTaskCountToday: Int {
         let today = JournalDate.startOfDay(Date())
-        return days.first(where: { $0.date == today })?.openTodoCount ?? 0
+        guard let day = days.first(where: { $0.date == today }) else { return 0 }
+        return Self.distinctOpenTaskCount(days: [day], cutoff: today)
     }
+    /// Distinct open tasks across the last three months of notes, cached
+    /// from a debounced background pass. A lifetime total is swamped by
+    /// long-abandoned TODOs, and duplicates (the same title carried into
+    /// many days) must count once — so titles are deduplicated with the
+    /// newest occurrence deciding the state.
+    private(set) var openTaskCountTotal = 0
 
     var onExternalChange: (() -> Void)?
 
@@ -206,8 +210,67 @@ final class VaultStore {
     private func applySnapshot(days newDays: [JournalDay], pageCount newPageCount: Int) {
         days = newDays
         pageCount = newPageCount
-        openTaskCountTotal = newDays.reduce(0) { $0 + $1.openTodoCount }
         pageNamesCache = nil
+        scheduleOpenTaskCountUpdate()
+    }
+
+    /// First day included in the "All" open-task counter: three months
+    /// back from today, local start-of-day.
+    static func openCountCutoff(now: Date = Date()) -> Date {
+        Calendar.current.date(byAdding: .month, value: -3,
+                              to: JournalDate.startOfDay(now)) ?? .distantPast
+    }
+
+    /// Distinct open tasks over `days` (newest first, only days >= cutoff):
+    /// a title counts once — first (newest) occurrence wins, so duplicates
+    /// carried across many days collapse to one, and a title whose newest
+    /// occurrence is DONE doesn't count even if stale open copies remain.
+    static func distinctOpenTaskCount(days: [JournalDay], cutoff: Date) -> Int {
+        var seen = Set<String>()
+        var count = 0
+        func walk(_ nodes: [Block]) {
+            for node in nodes {
+                switch node.todoState {
+                case .open, .done:
+                    let key = BlockTree.normalize(node.content)
+                    if !key.isEmpty, seen.insert(key).inserted, node.todoState == .open {
+                        count += 1
+                    }
+                case .none:
+                    break
+                }
+                walk(node.children)
+            }
+        }
+        for day in days where day.date >= cutoff {
+            day.files.forEach { walk($0.blocks) }
+        }
+        return count
+    }
+
+    /// The dedupe walk touches every block of three months of notes, so it
+    /// runs debounced on a background queue over a snapshot — no index
+    /// file needed (the parsed days already live in memory) and never on
+    /// the main thread.
+    private let openCountQueue = DispatchQueue(label: "daystream.opencount", qos: .utility)
+    private var openCountWorkItem: DispatchWorkItem?
+    private var openCountGeneration = 0
+
+    private func scheduleOpenTaskCountUpdate() {
+        openCountWorkItem?.cancel()
+        openCountGeneration += 1
+        let generation = openCountGeneration
+        let snapshot = days
+        let cutoff = Self.openCountCutoff()
+        let item = DispatchWorkItem { [weak self] in
+            let count = Self.distinctOpenTaskCount(days: snapshot, cutoff: cutoff)
+            DispatchQueue.main.async {
+                guard let self, self.openCountGeneration == generation else { return }
+                self.openTaskCountTotal = count
+            }
+        }
+        openCountWorkItem = item
+        openCountQueue.asyncAfter(deadline: .now() + 0.4, execute: item)
     }
 
     func reload() {
@@ -362,10 +425,9 @@ final class VaultStore {
         }
         if let dayIndex = days.firstIndex(where: { $0.date == file.date }) {
             if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == file.url }) {
-                let oldOpenCount = days[dayIndex].openTodoCount
                 days[dayIndex].files[fileIndex] = file
                 days[dayIndex].refreshOpenTodos()
-                openTaskCountTotal += days[dayIndex].openTodoCount - oldOpenCount
+                scheduleOpenTaskCountUpdate()
             } else {
                 reload()
             }

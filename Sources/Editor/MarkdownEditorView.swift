@@ -70,7 +70,6 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.isAutomaticTextReplacementEnabled = true
         tv.isAutomaticSpellingCorrectionEnabled = true
         tv.isContinuousSpellCheckingEnabled = false
-        tv.textContainerInset = Self.inset(liveMarkdown: AppSettings.shared.liveMarkdownRendering)
         tv.textContainer?.lineFragmentPadding = 4
         // Content-fitting, not scrolling: width tracks the container, height
         // is whatever the text needs (set in the container's layout pass).
@@ -80,9 +79,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.textContainer?.heightTracksTextView = false
         tv.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         tv.string = text
+        tv.updateRenderingMode(for: text)
+        tv.textContainerInset = MarkdownEditorView.inset(liveMarkdown: tv.liveMarkdownEnabled)
         tv.revealAllSyntaxInitially()
         tv.layoutManager?.delegate = tv
-        tv.liveMarkdownEnabled = AppSettings.shared.liveMarkdownRendering
         context.coordinator.appliedLiveMarkdown = tv.liveMarkdownEnabled
         tv.delegate = context.coordinator
         tv.onCommit = onCommit
@@ -155,7 +155,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             tv.highlight()
             nsView.invalidateIntrinsicContentSize()
         }
-        let liveRendering = AppSettings.shared.liveMarkdownRendering
+        let liveRendering = AppSettings.shared.liveMarkdownRendering && !tv.rendersPlain
         if context.coordinator.appliedLiveMarkdown != liveRendering {
             context.coordinator.appliedLiveMarkdown = liveRendering
             tv.liveMarkdownEnabled = liveRendering
@@ -309,6 +309,15 @@ final class EditorTextView: NSTextView {
     /// Edit recorded in shouldChangeText (UTF-16 range after the edit) and
     /// consumed by the next handleTextChanged for line-local highlighting.
     private var pendingEditRange: NSRange?
+    /// Hidden-syntax candidates need rebuilding after any text change (all
+    /// edit paths — typing, external pushes, programmatic edits — funnel
+    /// through handleTextChanged).
+    private var hiddenCandidatesStale = true
+    /// Per-line hideable syntax ranges (caret-independent), ordered by
+    /// document position. Glyph generation queries this instead of
+    /// re-scanning the document per chunk — that rescan was O(n²) with a
+    /// regex per line and froze layout on large notes.
+    private var hiddenCandidates: [(lineRange: NSRange, ranges: [NSRange])] = []
     /// External replacement deferred while an input method has marked text.
     private var pendingExternalText: String?
     /// Idle-timer that reconciles cross-line effects (fences) after typing.
@@ -324,6 +333,36 @@ final class EditorTextView: NSTextView {
             invalidateAllGlyphs()
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
+        }
+    }
+    /// Giant notes (log pastes, imports) render plain: no glyph hiding, no
+    /// gutter decorations, no per-line regex styling. Those passes cost
+    /// hundreds of milliseconds at this size and froze the stream whenever
+    /// a big note's cell materialized while scrolling. Re-evaluated on
+    /// creation and on whole-text swaps only — flipping mid-typing would
+    /// churn the layout harder than it saves.
+    private(set) var rendersPlain = false
+
+    static let plainRenderingLineThreshold = 1200
+
+    static func isHugeText(_ text: String) -> Bool {
+        var lines = 1
+        var searchStart = text.startIndex
+        while let r = text.range(of: "\n", range: searchStart..<text.endIndex) {
+            lines += 1
+            if lines > plainRenderingLineThreshold { return true }
+            searchStart = r.upperBound
+        }
+        return false
+    }
+
+    /// Applies the plain/live-rendering decision for a whole new text.
+    func updateRenderingMode(for newText: String) {
+        let huge = Self.isHugeText(newText)
+        rendersPlain = huge
+        let wanted = !huge && AppSettings.shared.liveMarkdownRendering
+        if liveMarkdownEnabled != wanted {
+            liveMarkdownEnabled = wanted
         }
     }
     /// Full line(s) the selection touches — their syntax stays visible so
@@ -372,6 +411,7 @@ final class EditorTextView: NSTextView {
     /// a keystroke never triggers SwiftUI work.
     func handleTextChanged() {
         applyPendingExternalText()
+        hiddenCandidatesStale = true
         highlightPendingEdit()
         refreshActiveLineHiding()
         updateSuggestions()
@@ -391,6 +431,7 @@ final class EditorTextView: NSTextView {
         }
         pendingEditRange = nil
         let sel = selectedRange()
+        updateRenderingMode(for: newText)
         revealAllSyntaxInitially()
         string = newText
         highlight()
@@ -1192,6 +1233,12 @@ final class EditorTextView: NSTextView {
             .font: baseFont,
             .foregroundColor: NSColor.labelColor,
         ], range: full)
+        // Plain renderers stop here: one base-attribute pass over the
+        // whole text, no per-line regex styling.
+        guard !rendersPlain else {
+            storage.endEditing()
+            return
+        }
 
         let s = storage.string as NSString
         var inFence = false
@@ -1211,7 +1258,7 @@ final class EditorTextView: NSTextView {
     private func highlightPendingEdit() {
         guard let storage = textStorage else { return }
         defer { pendingEditRange = nil }
-        guard let edited = pendingEditRange else { return }
+        guard !rendersPlain, let edited = pendingEditRange else { return }
         let s = storage.string as NSString
         guard edited.location <= s.length else { return }
         let clamped = NSRange(location: edited.location,
@@ -1450,8 +1497,41 @@ final class EditorTextView: NSTextView {
         let s = string as NSString
         let baseFont = font ?? .systemFont(ofSize: 14)
 
-        for deco in decorations {
+        // Partial draws visit only the decorations whose lines fall in the
+        // dirty region — scrolling large notes redraws narrow strips
+        // constantly, and walking every decoration's fragment each time
+        // showed up as frame drops.
+        var startIndex = 0
+        var maxCharIndex = s.length
+        if !fullRedraw {
+            let containerRect = NSRect(
+                x: dirtyRect.minX - textContainerInset.width,
+                y: dirtyRect.minY - textContainerInset.height,
+                width: dirtyRect.width,
+                height: dirtyRect.height
+            ).intersection(NSRect(origin: .zero, size: container.size))
+            guard containerRect.width > 0, containerRect.height > 0 else { return }
+            let dirtyGlyphs = layoutManager.glyphRange(forBoundingRect: containerRect, in: container)
+            guard dirtyGlyphs.length > 0 else { return }
+            let dirtyChars = layoutManager.characterRange(
+                forGlyphRange: dirtyGlyphs, actualGlyphRange: nil)
+            maxCharIndex = NSMaxRange(dirtyChars)
+            var lo = 0
+            var hi = decorations.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if NSMaxRange(decorations[mid].lineRange) <= dirtyChars.location {
+                    lo = mid + 1
+                } else {
+                    hi = mid
+                }
+            }
+            startIndex = lo
+        }
+
+        for deco in decorations[startIndex...] {
             guard deco.lineRange.length > 0,
+                  deco.lineRange.location < maxCharIndex,
                   NSIntersectionRange(deco.lineRange, activeLineCharRange).length == 0
             else { continue }
             let glyphRange = layoutManager.glyphRange(forCharacterRange: deco.lineRange, actualCharacterRange: nil)
@@ -1591,7 +1671,7 @@ final class EditorTextView: NSTextView {
     private func rebuildDecorations() {
         decorationsDirty = false
         decorations = []
-        guard let storage = textStorage, storage.length > 0 else { return }
+        guard !rendersPlain, let storage = textStorage, storage.length > 0 else { return }
         let text = storage.string
         let lines = text.components(separatedBy: "\n")
         var starts: [Int] = []
@@ -1654,7 +1734,7 @@ extension EditorTextView {
     /// the top of a note whose editor was created empty (caret 0), and the
     /// pushed text adopts that dead position.
     func refreshActiveLineHiding() {
-        guard let layoutManager, let storage = textStorage else { return }
+        guard liveMarkdownEnabled, let layoutManager, let storage = textStorage else { return }
         guard storage.length > 0 else {
             activeLineCharRange = NSRange(location: 0, length: 0)
             return
@@ -1698,35 +1778,70 @@ extension EditorTextView {
         return count
     }
 
-    /// Hide-set for a glyph-generation chunk: per-line syntax ranges over the
-    /// chunk's lines, skipping fenced code and the active line. Fence state
-    /// needs a doc-start scan — same cost profile as the existing
-    /// fenceOpen(before:) pass; daily notes stay small.
+    /// Hide-set for a glyph-generation chunk: the precomputed candidate
+    /// ranges of the chunk's lines, minus the caret's line. One full pass
+    /// per text version (see `hiddenCandidates`), O(chunk) per query —
+    /// the old per-chunk rescan from the document start was O(n²).
     private func hiddenRanges(forCharacterRange range: NSRange) -> [NSRange] {
         guard let storage = textStorage, storage.length > 0 else { return [] }
+        if hiddenCandidatesStale {
+            rebuildHiddenCandidates()
+        }
         let s = storage.string as NSString
         let loc = min(range.location, s.length)
         let len = min(range.length, s.length - loc)
         guard len > 0 else { return [] }
         let covered = s.lineRange(for: NSRange(location: loc, length: len))
-        var hidden: [NSRange] = []
-        var inFence = false
-        s.enumerateSubstrings(in: NSRange(location: 0, length: NSMaxRange(covered)), options: .byLines) { sub, lineRange, _, _ in
-            let opensFence = sub.map { BlockTree.fenceMarker($0.trimmingCharacters(in: .whitespaces)) != nil } ?? false
-            defer { if opensFence { inFence.toggle() } }
-            guard !inFence else { return }
-            guard NSIntersectionRange(lineRange, covered).length > 0 else { return }
-            guard NSIntersectionRange(lineRange, self.activeLineCharRange).length == 0 else { return }
-            guard let sub, !sub.isEmpty else { return }
-            // Bookkeeping properties (added::/completed::/id::) vanish
-            // entirely — the rendered view never showed them either.
-            if LiveMarkdown.isBookkeepingPropertyLine(sub) {
-                hidden.append(lineRange)
-                return
+
+        // Candidates are ordered by line: binary-search to the first line
+        // that can reach into `covered`, then walk until past its end.
+        var lo = 0
+        var hi = hiddenCandidates.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if NSMaxRange(hiddenCandidates[mid].lineRange) <= covered.location {
+                lo = mid + 1
+            } else {
+                hi = mid
             }
-            hidden.append(contentsOf: LiveMarkdown.hiddenRanges(line: sub, offset: lineRange.location))
+        }
+        var hidden: [NSRange] = []
+        var i = lo
+        while i < hiddenCandidates.count,
+              hiddenCandidates[i].lineRange.location < NSMaxRange(covered) {
+            let entry = hiddenCandidates[i]
+            if NSIntersectionRange(entry.lineRange, activeLineCharRange).length == 0 {
+                hidden.append(contentsOf: entry.ranges)
+            }
+            i += 1
         }
         return hidden
+    }
+
+    /// One pass over the document: for every line (outside fences), the
+    /// syntax ranges that hide when the caret isn't on it. Bookkeeping
+    /// property lines hide entirely.
+    private func rebuildHiddenCandidates() {
+        hiddenCandidatesStale = false
+        hiddenCandidates = []
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let s = storage.string as NSString
+        var inFence = false
+        s.enumerateSubstrings(
+            in: NSRange(location: 0, length: s.length), options: .byLines
+        ) { substring, lineRange, _, _ in
+            let opensFence = substring.map {
+                BlockTree.fenceMarker($0.trimmingCharacters(in: .whitespaces)) != nil
+            } ?? false
+            defer { if opensFence { inFence.toggle() } }
+            guard !inFence, let substring, !substring.isEmpty else { return }
+            if LiveMarkdown.isBookkeepingPropertyLine(substring) {
+                self.hiddenCandidates.append((lineRange, [lineRange]))
+            } else {
+                self.hiddenCandidates.append(
+                    (lineRange, LiveMarkdown.hiddenRanges(line: substring, offset: lineRange.location)))
+            }
+        }
     }
 }
 

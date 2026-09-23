@@ -193,23 +193,67 @@ final class VaultFeatureTests: XCTestCase {
 
     // MARK: - Open-task counters
 
+    private func makeDay(_ text: String, _ date: Date) -> JournalDay {
+        JournalDay(date: date, files: [
+            VaultFile(url: journals.appendingPathComponent("t-\(date.timeIntervalSince1970).md"),
+                      date: date, text: text)
+        ])
+    }
+
+    func testDistinctOpenTaskCountDedupesAcrossDays() throws {
+        let old = utcDate("2026-08-01")
+        let mid = utcDate("2026-08-15")
+        // Newest-first, like store.days.
+        let days = [
+            makeDay("- TODO pay rent\n- TODO fresh task\n", mid),
+            makeDay("- TODO PAY RENT\n", old),
+        ]
+        XCTAssertEqual(VaultStore.distinctOpenTaskCount(days: days, cutoff: .distantPast), 2,
+                       "'pay rent' open on two days counts once")
+    }
+
+    func testDistinctOpenTaskCountNewestOccurrenceWins() throws {
+        let old = utcDate("2026-08-01")
+        let mid = utcDate("2026-08-15")
+        let reopened = [
+            makeDay("- TODO pay rent\n", mid),
+            makeDay("- DONE pay rent\n", old),
+        ]
+        XCTAssertEqual(VaultStore.distinctOpenTaskCount(days: reopened, cutoff: .distantPast), 1,
+                       "done long ago, open again now: counts")
+        let stale = [
+            makeDay("- DONE pay rent\n", mid),
+            makeDay("- TODO pay rent\n", old),
+        ]
+        XCTAssertEqual(VaultStore.distinctOpenTaskCount(days: stale, cutoff: .distantPast), 0,
+                       "newest occurrence done: stale open copies don't count")
+    }
+
+    func testDistinctOpenTaskCountHonorsCutoff() throws {
+        let days = [makeDay("- TODO ancient task\n", utcDate("2020-01-01"))]
+        XCTAssertEqual(VaultStore.distinctOpenTaskCount(days: days, cutoff: utcDate("2026-08-01")), 0)
+        XCTAssertEqual(VaultStore.distinctOpenTaskCount(days: days, cutoff: .distantPast), 1)
+    }
+
     func testOpenTaskCountsAcrossDaysAndToday() throws {
-        // Today's filename follows the local timezone convention.
-        try write("- TODO one\n- DONE two\n- TODO three\n",
-                  name: JournalDate.filename(for: Date()))
-        try write("- TODO old task\n- plain note\n", name: "2026-08-17.md")
+        let recent = JournalDate.filename(for: Date().addingTimeInterval(-14 * 86400))
+        let ancient = JournalDate.filename(for: Date().addingTimeInterval(-150 * 86400))
+        let todayName = JournalDate.filename(for: Date())
+        // "check backups" duplicated: today + recent — one distinct task.
+        try write("- TODO one\n- DONE two\n- TODO three\n- TODO check backups\n", name: todayName)
+        try write("- TODO check backups\n", name: recent)
+        try write("- TODO ancient task\n", name: ancient)
 
         let store = makeStore()
-        XCTAssertEqual(store.openTaskCountTotal, 3)
-        XCTAssertEqual(store.openTaskCountToday, 2)
-
-        // In-place refresh (a toggle in today's note) adjusts both counters.
-        let todayName = JournalDate.filename(for: Date())
-        let today = dayContaining(store, fileName: todayName)
-        let file = today.files.first { $0.url.lastPathComponent == todayName }!
-        store.toggleTodo(in: file, block: file.blocks[0], syncAcrossNotes: false)
-        XCTAssertEqual(store.openTaskCountTotal, 2)
-        XCTAssertEqual(store.openTaskCountToday, 1)
+        XCTAssertEqual(store.openTaskCountToday, 3,
+                       "today: one, three, check backups — DONE and duplicates excluded")
+        // The total arrives from a debounced background pass.
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, store.openTaskCountTotal != 3 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(store.openTaskCountTotal, 3,
+                       "today's 3 distinct + recent duplicate collapses; ancient excluded")
     }
 
     // MARK: - Legacy filename migration
