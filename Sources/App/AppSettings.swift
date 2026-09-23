@@ -23,6 +23,7 @@ final class AppSettings {
         static let lastAutoBackup = "daystream.lastAutoBackupDate"
         static let globalQuickAddEnabled = "daystream.globalQuickAddEnabled"
         static let globalQuickAddSpec = "daystream.globalQuickAddSpec"
+        static let recurringHeader = "daystream.recurringTaskHeader"
     }
 
     /// Automatic git backup cadence: daily or weekly (weekly is the default).
@@ -142,6 +143,18 @@ final class AppSettings {
     var globalQuickAddSpec: String {
         didSet { UserDefaults.standard.set(globalQuickAddSpec, forKey: Keys.globalQuickAddSpec) }
     }
+    /// Wikilink name of the section header that groups recurring tasks in
+    /// each day's note, written as `## [[<name>]]`. Whitespace-only values
+    /// fall back to ADMIN.
+    var recurringTaskHeader: String {
+        didSet { UserDefaults.standard.set(recurringTaskHeader, forKey: Keys.recurringHeader) }
+    }
+
+    /// Header name trimmed, with the ADMIN default applied.
+    var effectiveRecurringTaskHeader: String {
+        let trimmed = recurringTaskHeader.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "ADMIN" : trimmed
+    }
 
     var quickAddHotkey: HotkeySpec? {
         HotkeySpec.parse(globalQuickAddSpec)
@@ -163,6 +176,7 @@ final class AppSettings {
         self.lastAutoBackup = d.object(forKey: Keys.lastAutoBackup) as? Date
         self.globalQuickAddEnabled = d.object(forKey: Keys.globalQuickAddEnabled) as? Bool ?? true
         self.globalQuickAddSpec = d.string(forKey: Keys.globalQuickAddSpec) ?? HotkeySpec.defaultQuickAdd.storage
+        self.recurringTaskHeader = d.string(forKey: Keys.recurringHeader) ?? "ADMIN"
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {

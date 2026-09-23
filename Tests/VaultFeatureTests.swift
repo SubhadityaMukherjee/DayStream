@@ -191,6 +191,27 @@ final class VaultFeatureTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url!.path), "page file must exist on disk at creation")
     }
 
+    // MARK: - Open-task counters
+
+    func testOpenTaskCountsAcrossDaysAndToday() throws {
+        // Today's filename follows the local timezone convention.
+        try write("- TODO one\n- DONE two\n- TODO three\n",
+                  name: JournalDate.filename(for: Date()))
+        try write("- TODO old task\n- plain note\n", name: "2026-08-17.md")
+
+        let store = makeStore()
+        XCTAssertEqual(store.openTaskCountTotal, 3)
+        XCTAssertEqual(store.openTaskCountToday, 2)
+
+        // In-place refresh (a toggle in today's note) adjusts both counters.
+        let todayName = JournalDate.filename(for: Date())
+        let today = dayContaining(store, fileName: todayName)
+        let file = today.files.first { $0.url.lastPathComponent == todayName }!
+        store.toggleTodo(in: file, block: file.blocks[0], syncAcrossNotes: false)
+        XCTAssertEqual(store.openTaskCountTotal, 2)
+        XCTAssertEqual(store.openTaskCountToday, 1)
+    }
+
     // MARK: - Legacy filename migration
 
     func testMigrateLegacyFilenamesRenamesAndBacksUp() throws {

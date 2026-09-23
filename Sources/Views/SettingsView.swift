@@ -242,17 +242,21 @@ private struct FontTab: View {
     }
 }
 
-/// Manage recurring tasks: daily, weekly on a weekday, or once on a date.
-/// Due tasks are seeded at the top of the day's note (duplicate-checked).
+/// Manage recurring tasks: daily, weekly, biweekly on a weekday, or once on
+/// a date. Due tasks are seeded under the configured section header in the
+/// day's note (duplicate-checked).
 private struct RecurringTab: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
 
     @State private var title = ""
-    @State private var mode = 0 // 0 daily, 1 weekly, 2 once
+    @State private var mode = 0 // 0 daily, 1 weekly, 2 once, 3 biweekly
     @State private var weekday = 2
     @State private var onceDate = JournalDate.startOfDay(Date())
+    @State private var taskHeader = ""
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Existing") {
                 if appModel.recurring.tasks.isEmpty {
@@ -265,7 +269,8 @@ private struct RecurringTab: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(task.title)
                                     .lineLimit(1)
-                                Text(task.scheduleDescription())
+                                Text(task.scheduleDescription()
+                                     + (task.header.map { " · [[\($0)]]" } ?? ""))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -291,11 +296,15 @@ private struct RecurringTab: View {
                 Picker("Repeats", selection: $mode) {
                     Text("Daily").tag(0)
                     Text("Weekly").tag(1)
+                    Text("Bi-Weekly").tag(3)
                     Text("Once").tag(2)
                 }
                 .pickerStyle(.segmented)
 
-                if mode == 1 {
+                TextField("Header (default: \(settings.effectiveRecurringTaskHeader))",
+                          text: $taskHeader)
+
+                if mode == 1 || mode == 3 {
                     Picker("On", selection: $weekday) {
                         ForEach(1...7, id: \.self) { day in
                             Text(Calendar.current.weekdaySymbols[day - 1]).tag(day)
@@ -309,27 +318,42 @@ private struct RecurringTab: View {
 
                 Button("Add Recurring Task", action: add)
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
 
-                Text("Due tasks appear as a TODO at the top of that day's note, and are never duplicated.")
+            Section("Task Header") {
+                TextField("Header (default ADMIN)", text: $settings.recurringTaskHeader)
+                Text("Due tasks are grouped under a - [[header]] section in each day's note (ADMIN by default). The header is reused when it already exists — never duplicated.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 440)
+        .frame(width: 460, height: 500)
     }
 
     private func add() {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        let trimmedHeader = taskHeader.trimmingCharacters(in: .whitespacesAndNewlines)
         let schedule: RecurringTask.Schedule
         switch mode {
         case 1: schedule = .weekly(weekday: weekday)
         case 2: schedule = .once(date: onceDate)
+        case 3: schedule = .biweekly(weekday: weekday)
         default: schedule = .daily
         }
-        appModel.recurring.add(RecurringTask(title: trimmed, schedule: schedule))
+        let task = RecurringTask(title: trimmed, schedule: schedule,
+                                 header: trimmedHeader.isEmpty ? nil : trimmedHeader)
+        appModel.recurring.add(task)
+        // Every new task lands in today's note right away — even when its
+        // schedule isn't due today (weekly on another weekday, say) — and
+        // recurrence calculates from this point on.
+        let effectiveHeader = trimmedHeader.isEmpty
+            ? AppSettings.shared.effectiveRecurringTaskHeader
+            : trimmedHeader
+        _ = appModel.store?.addRecurringTask(task.title, to: Date(), header: effectiveHeader)
         title = ""
+        taskHeader = ""
     }
 }
 

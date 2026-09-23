@@ -135,6 +135,9 @@ struct CalendarView: View {
                     .opacity(hasNote ? 1 : 0)
             }
             .frame(maxWidth: .infinity, minHeight: 30)
+            // Plain buttons only hit opaque label content — the cell's
+            // transparent areas (most of its width) weren't clickable.
+            .contentShape(.rect)
             // Glass only on the today cell — not all 30+ cells of the grid.
             .background {
                 if isToday {

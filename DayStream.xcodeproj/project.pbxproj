@@ -24,8 +24,10 @@
 		58AA473C480CF1BCEF5B4CF6 /* Deadline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19C1E6CA336FB755C292C968 /* Deadline.swift */; };
 		5985E748E9FB36A2A60E1C87 /* BlockTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6325935B942277AF6F6D0638 /* BlockTree.swift */; };
 		5ED9725DD31AE76FFF78BE82 /* LiveMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE9FE1419908247D6BEA0294 /* LiveMarkdown.swift */; };
+		634BB223AC878ADD04737B41 /* SummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 045AA4E7DD1963041DE90F8B /* SummaryView.swift */; };
 		64ED75AA0EBEA0AC25BC3820 /* NoteFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A71BA98B107AE412A2CD3D /* NoteFormatterTests.swift */; };
 		70F46FD8CBBF0B1194BB5553 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */; };
+		71D23E6D732DCB1AC8892DE3 /* DaySummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92C5AAA3E8601383E843D40F /* DaySummaryTests.swift */; };
 		74926DDCBCC2C9ED8C04BA94 /* JournalDate.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5121535597CF66EE7B102F4 /* JournalDate.swift */; };
 		86055AC10FE5F4A5B13B4A23 /* RecurringTask.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5878FA05D237542D2AC416C /* RecurringTask.swift */; };
 		92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */; };
@@ -40,6 +42,7 @@
 		C47CAD6AC4F60E13DAFA60AD /* MarkdownEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */; };
 		CC95C10DB08ADCB0CB7B4941 /* VaultFeatureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC1E7D124C72CE8DC8B18E9 /* VaultFeatureTests.swift */; };
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
+		DA0B6ADB5FDF45A3CA8AAA36 /* DaySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3BEB60C9E88D9E041E383BA /* DaySummary.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
 		F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */; };
 /* End PBXBuildFile section */
@@ -56,6 +59,7 @@
 
 /* Begin PBXFileReference section */
 		03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitBackup.swift; sourceTree = "<group>"; };
+		045AA4E7DD1963041DE90F8B /* SummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryView.swift; sourceTree = "<group>"; };
 		0563AF8CB4E538EA3D7E6DBE /* AppSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettings.swift; sourceTree = "<group>"; };
 		095E91CD8DE0985572D4BADE /* MarkdownEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownEditorView.swift; sourceTree = "<group>"; };
 		172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeBlockAndFormatTests.swift; sourceTree = "<group>"; };
@@ -78,6 +82,7 @@
 		73A71BA98B107AE412A2CD3D /* NoteFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFormatterTests.swift; sourceTree = "<group>"; };
 		7E026860706F7C832FDBE3CF /* VaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultStore.swift; sourceTree = "<group>"; };
 		8EE1E8737F1E227D4A63007B /* LiveMarkdownTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveMarkdownTests.swift; sourceTree = "<group>"; };
+		92C5AAA3E8601383E843D40F /* DaySummaryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaySummaryTests.swift; sourceTree = "<group>"; };
 		943F9B46D9343475A62326DF /* WikiDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WikiDate.swift; sourceTree = "<group>"; };
 		97CB131027A4266DC2C0B9A6 /* DayStreamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DayStreamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7095D2E8BAAA3630B334211 /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
@@ -87,6 +92,7 @@
 		C14A21F9F98D595DFF1FB767 /* DayStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C5878FA05D237542D2AC416C /* RecurringTask.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecurringTask.swift; sourceTree = "<group>"; };
 		D28CCBC0CF4AC629300BDC1B /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		D3BEB60C9E88D9E041E383BA /* DaySummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaySummary.swift; sourceTree = "<group>"; };
 		DCA1348BAFDBBB6D4B124C42 /* GlobalHotkey.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkey.swift; sourceTree = "<group>"; };
 		DE9FE1419908247D6BEA0294 /* LiveMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveMarkdown.swift; sourceTree = "<group>"; };
 		E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyStreamView.swift; sourceTree = "<group>"; };
@@ -110,6 +116,7 @@
 			children = (
 				6325935B942277AF6F6D0638 /* BlockTree.swift */,
 				B84877F8F494AFFEAA6E3850 /* CarryForward.swift */,
+				D3BEB60C9E88D9E041E383BA /* DaySummary.swift */,
 				19C1E6CA336FB755C292C968 /* Deadline.swift */,
 				03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */,
 				B5121535597CF66EE7B102F4 /* JournalDate.swift */,
@@ -138,6 +145,7 @@
 			children = (
 				620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */,
 				172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */,
+				92C5AAA3E8601383E843D40F /* DaySummaryTests.swift */,
 				69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */,
 				8EE1E8737F1E227D4A63007B /* LiveMarkdownTests.swift */,
 				5D4BF23584F499B8D9BA92CE /* MultiFileDayTests.swift */,
@@ -166,6 +174,7 @@
 				A7095D2E8BAAA3630B334211 /* MarkdownText.swift */,
 				424E0ECF875895A3EC9513CA /* PageView.swift */,
 				6E42184F435A686A811D04BC /* SettingsView.swift */,
+				045AA4E7DD1963041DE90F8B /* SummaryView.swift */,
 				F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */,
 			);
 			path = Views;
@@ -298,6 +307,7 @@
 			files = (
 				135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */,
 				35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */,
+				71D23E6D732DCB1AC8892DE3 /* DaySummaryTests.swift in Sources */,
 				92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */,
 				31C15D75F044FCF28DE70C38 /* LiveMarkdownTests.swift in Sources */,
 				BEF7AA884ACA542AA2659A1F /* MultiFileDayTests.swift in Sources */,
@@ -318,6 +328,7 @@
 				E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */,
 				2465C91D68FC86B051CAE640 /* DaySectionView.swift in Sources */,
 				A4E760288880C82880E160E3 /* DayStreamApp.swift in Sources */,
+				DA0B6ADB5FDF45A3CA8AAA36 /* DaySummary.swift in Sources */,
 				58AA473C480CF1BCEF5B4CF6 /* Deadline.swift in Sources */,
 				F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */,
 				50FEECFABCA49B532F239D0F /* GlassStyle.swift in Sources */,
@@ -333,6 +344,7 @@
 				86055AC10FE5F4A5B13B4A23 /* RecurringTask.swift in Sources */,
 				3B6C6A3D79A9F6C8C4414AD6 /* SettingsView.swift in Sources */,
 				B231746BDA28B33A89736FDE /* SetupView.swift in Sources */,
+				634BB223AC878ADD04737B41 /* SummaryView.swift in Sources */,
 				1FD61F5462359A5083B89F41 /* VaultStore.swift in Sources */,
 				1655BDF3E41349657463F5E4 /* WelcomeView.swift in Sources */,
 				B44BD1958C85D05C67683844 /* WikiDate.swift in Sources */,

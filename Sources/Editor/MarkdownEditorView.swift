@@ -2,7 +2,13 @@ import SwiftUI
 import AppKit
 
 /// A non-scrolling, content-fitting markdown editor with outliner niceties:
-/// - Enter continues the bullet at the same indent (empty bullet exits the list)
+/// - Enter continues the bullet at the same indent (empty bullet exits the
+///   list; non-bullet lines get a plain newline, like any Mac editor)
+/// - Backspace/fn-delete treat hidden `added::`/`completed::` stamp lines as
+///   line attributes, not text: joining erases them instead of merging into
+///   them, so erasing a task never corrupts the note
+/// - Standard macOS typing is on: smart quotes/dashes, text replacement,
+///   autocorrection, and (while editing) spell checking
 /// - Tab / Shift-Tab indent / outdent the current line
 /// - `/todo `, `/doing `, `/later `, `/done ` expand to TODO-style markers
 /// - Escape flushes the pending save (callers decide what "done" means)
@@ -55,9 +61,14 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.drawsBackground = false
         tv.isRichText = false
         tv.allowsUndo = true
-        tv.isAutomaticDashSubstitutionEnabled = false
-        tv.isAutomaticQuoteSubstitutionEnabled = false
-        tv.isAutomaticTextReplacementEnabled = false
+        // Standard macOS typing, like any text editor on the system: smart
+        // quotes/dashes, text-replacement shortcuts, autocorrection.
+        // Continuous spell checking is toggled on focus (see EditorTextView)
+        // so dormant day editors render clean preview, not stale squiggles.
+        tv.isAutomaticQuoteSubstitutionEnabled = true
+        tv.isAutomaticDashSubstitutionEnabled = true
+        tv.isAutomaticTextReplacementEnabled = true
+        tv.isAutomaticSpellingCorrectionEnabled = true
         tv.isContinuousSpellCheckingEnabled = false
         tv.textContainerInset = Self.inset(liveMarkdown: AppSettings.shared.liveMarkdownRendering)
         tv.textContainer?.lineFragmentPadding = 4
@@ -192,7 +203,10 @@ struct MarkdownEditorView: NSViewRepresentable {
                 guard let self, let tv = self.textView, event.window === tv.window else { return event }
                 guard tv.window?.firstResponder === tv,
                       event.keyCode == 49,
-                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                      // An input-method session (marked text) owns the space
+                      // key: inserting a raw one corrupts the composition.
+                      !tv.hasMarkedText()
                 else { return event }
                 tv.insertText(" ", replacementRange: tv.selectedRange())
                 return nil
@@ -409,8 +423,9 @@ final class EditorTextView: NSTextView {
             // Only claim space while we're the active first responder — a
             // materialized (dormant) editor must never swallow the key from
             // whoever actually has focus (the local monitor below gates the
-            // same way).
-            guard window?.firstResponder === self else {
+            // same way). Input-method compositions keep the event: a raw
+            // insert would break the marked-text session.
+            guard window?.firstResponder === self, !hasMarkedText() else {
                 return super.performKeyEquivalent(with: event)
             }
             insertText(" ", replacementRange: selectedRange())
@@ -506,11 +521,23 @@ final class EditorTextView: NSTextView {
         true
     }
 
+    /// Spell check runs only on the focused editor: every day in the stream
+    /// is an editor, and dormant ones render live preview where squiggles
+    /// (and the cost of checking every note) don't belong.
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { isContinuousSpellCheckingEnabled = true }
+        return ok
+    }
+
     /// The suggestion panel is non-activating, so it can't dismiss itself
     /// when focus moves elsewhere; close it here instead.
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
-        if ok { closeSuggestions() }
+        if ok {
+            isContinuousSpellCheckingEnabled = false
+            closeSuggestions()
+        }
         return ok
     }
 
@@ -822,6 +849,14 @@ final class EditorTextView: NSTextView {
         let indentUnits = BlockTree.leadingWhitespaceUnits(lineText)
         let afterIndent = lineText.drop { $0 == "\t" || $0 == " " }
         let isEmptyBullet = afterIndent == "-" || afterIndent == "*"
+        let isBulletLine = afterIndent.hasPrefix("- ") || afterIndent.hasPrefix("* ")
+
+        // Non-bullet lines (prose, headings) get a plain newline, the way
+        // every Mac text editor behaves — bullets only continue bullets.
+        guard isBulletLine || isEmptyBullet else {
+            super.insertNewline(sender)
+            return
+        }
 
         if isEmptyBullet {
             // Exit the list: clear the empty bullet (and any property lines
@@ -903,6 +938,107 @@ final class EditorTextView: NSTextView {
         replaceCharacters(in: lineRange, with: lineText)
         didChangeText()
         selectedRange = NSRange(location: max(caret - 1, 0), length: 0)
+    }
+
+    // MARK: - Erasing lines around hidden property lines
+
+    /// Contiguous bookkeeping property lines (`added::`, `completed::`, …)
+    /// directly after `lineRange`, as one range including their newlines.
+    /// These lines are invisible while the caret is elsewhere, so plain
+    /// text-editing keys joined onto them invisibly and corrupted notes —
+    /// deletes around them have to consume them deliberately.
+    private func trailingPropertyLines(afterLine lineRange: NSRange) -> NSRange? {
+        let s = string as NSString
+        var start = -1
+        var end = -1
+        var scan = NSMaxRange(lineRange)
+        while scan < s.length {
+            let next = s.lineRange(for: NSRange(location: scan, length: 0))
+            let line = s.substring(with: next)
+            guard LiveMarkdown.isBookkeepingPropertyLine(
+                line.trimmingCharacters(in: .whitespaces)) else { break }
+            if start < 0 { start = next.location }
+            end = NSMaxRange(next)
+            scan = end
+        }
+        guard start >= 0 else { return nil }
+        return NSRange(location: start, length: end - start)
+    }
+
+    private func deleteRange(_ range: NSRange) {
+        shouldChangeText(in: range, replacementString: "")
+        replaceCharacters(in: range, with: "")
+        didChangeText()
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        let sel = selectedRange()
+        if sel.length == 0, sel.location > 0 {
+            let s = string as NSString
+            let lineRange = s.lineRange(for: NSRange(location: sel.location, length: 0))
+            if sel.location == lineRange.location {
+                let current = s.substring(with: lineRange).trimmingCharacters(in: .whitespaces)
+                // On a stamp line itself: remove the whole (usually
+                // invisible) line — joining it into the block above would
+                // paste the timestamp into the task's text.
+                if LiveMarkdown.isBookkeepingPropertyLine(current) {
+                    deleteRange(lineRange)
+                    return
+                }
+                // Stamps sitting between the caret's line and the previous
+                // visible line: a plain join would merge onto a hidden
+                // property line, which then hides the merged text too.
+                // Join with the previous *visible* line instead.
+                var joinStart = lineRange.location
+                while joinStart > 0 {
+                    let prev = s.lineRange(for: NSRange(location: joinStart - 1, length: 0))
+                    let prevText = s.substring(with: prev).trimmingCharacters(in: .whitespaces)
+                    if LiveMarkdown.isBookkeepingPropertyLine(prevText) {
+                        joinStart = prev.location
+                    } else {
+                        break
+                    }
+                }
+                if joinStart < lineRange.location {
+                    // A bullet joined into the block above takes its own
+                    // stamps with it — they'd be orphans otherwise.
+                    if let stamps = trailingPropertyLines(afterLine: lineRange) {
+                        deleteRange(stamps)
+                    }
+                    deleteRange(NSRange(location: joinStart, length: lineRange.location - joinStart))
+                    return
+                }
+                // Plain join of a bullet line (or of the empty line a bullet
+                // was erased to): same orphan rule applies.
+                if current.isEmpty
+                    || current.hasPrefix("- ") || current.hasPrefix("* ")
+                    || current == "-" || current == "*",
+                    let stamps = trailingPropertyLines(afterLine: lineRange) {
+                    deleteRange(stamps)
+                    super.deleteBackward(sender)
+                    return
+                }
+            }
+        }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        let sel = selectedRange()
+        if sel.length == 0 {
+            let s = string as NSString
+            guard sel.location < s.length else { return super.deleteForward(sender) }
+            let lineRange = s.lineRange(for: NSRange(location: sel.location, length: 0))
+            // At a line end with invisible stamps below: erase those, not
+            // the newline (joining would drag the next visible line through
+            // the stamps into this block's tail).
+            if sel.location == NSMaxRange(lineRange) - 1,
+               let stamps = trailingPropertyLines(afterLine: lineRange) {
+                deleteRange(stamps)
+                return
+            }
+        }
+        super.deleteForward(sender)
     }
 
     override func insertText(_ string: Any, replacementRange: NSRange) {
@@ -1416,7 +1552,7 @@ final class EditorTextView: NSTextView {
     }
 
     private static let durationAttrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium),
         .foregroundColor: NSColor.systemGreen,
     ]
     private static let durationIcon: NSImage? = {
@@ -1431,17 +1567,24 @@ final class EditorTextView: NSTextView {
     private func drawDurationBadge(_ duration: String, fragment: NSRect) {
         let text = duration as NSString
         let textSize = text.size(withAttributes: Self.durationAttrs)
-        let h: CGFloat = 15
-        let iconSize: CGFloat = 9
-        let w = 6 + iconSize + 3 + textSize.width + 6
-        let x = bounds.width - w - 10
-        let y = fragment.midY + textContainerInset.height - h / 2
+        let h: CGFloat = 16
+        let iconSize: CGFloat = 10
+        let pad: CGFloat = 8
+        let gap: CGFloat = 4
+        // Measured widths run tight at these sizes; the fixed slack widens
+        // the capsule well past the text (right-anchored, so it grows
+        // leftward), so every duration length fits.
+        let w = pad + iconSize + gap + ceil(textSize.width) + pad + 24
+        let x = (bounds.width - w - 10).rounded()
+        let y = (fragment.midY + textContainerInset.height - h / 2).rounded()
         let capsule = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h),
                                    xRadius: h / 2, yRadius: h / 2)
         NSColor.systemGreen.withAlphaComponent(0.13).setFill()
         capsule.fill()
-        Self.durationIcon?.draw(in: NSRect(x: x + 6, y: y + (h - iconSize) / 2, width: iconSize, height: iconSize))
-        text.draw(at: NSPoint(x: x + 6 + iconSize + 3, y: y + (h - textSize.height) / 2),
+        Self.durationIcon?.draw(in: NSRect(x: x + pad, y: y + (h - iconSize) / 2,
+                                           width: iconSize, height: iconSize))
+        text.draw(at: NSPoint(x: x + pad + iconSize + gap,
+                              y: (y + (h - textSize.height) / 2).rounded()),
                   withAttributes: Self.durationAttrs)
     }
 

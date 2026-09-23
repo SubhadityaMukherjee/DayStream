@@ -21,6 +21,13 @@ final class AppModel {
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
 
+    /// Normalized titles of all recurring tasks — never carried forward
+    /// (their recurrence seeds them on the days they're due), or an open
+    /// copy would trail the user every following day.
+    private var recurringCarryExclusions: Set<String> {
+        Set(recurring.tasks.map { BlockTree.normalize($0.title) })
+    }
+
     enum SettingsTab: Int {
         case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4
     }
@@ -154,7 +161,8 @@ final class AppModel {
         let day = JournalDate.startOfDay(date)
         let isNewDate = !store.days.contains { $0.date == day }
         store.ensureDayFile(for: day)
-        store.applyRecurringTasks(recurring.tasks, to: day)
+        store.applyRecurringTasks(recurring.tasks, to: day,
+                                  header: AppSettings.shared.effectiveRecurringTaskHeader)
         store.applyDeadlines(deadlines.deadlines, to: day)
         if !store.days.contains(where: { $0.date == day }) {
             store.reload()
@@ -162,7 +170,7 @@ final class AppModel {
         // A brand-new date note starts with whatever was still unfinished
         // before that day (duplicate-checked, so revisiting is a no-op).
         if isNewDate, AppSettings.shared.carryForwardOnNewDate {
-            _ = store.carryForward(to: day)
+            _ = store.carryForward(to: day, excludingContentKeys: recurringCarryExclusions)
         }
         reveal(day: day)
     }
@@ -189,7 +197,7 @@ final class AppModel {
 
     func runCarryForward() {
         guard let store else { return }
-        let result = store.carryForward()
+        let result = store.carryForward(excludingContentKeys: recurringCarryExclusions)
         carrySummary = result
         ensureTodayExists()
     }
@@ -268,10 +276,11 @@ final class AppModel {
         // First application of the day this session (launch after midnight or
         // rollover while open): also carry unfinished tasks forward, silently.
         let isFirstToday = lastAppliedDay != today
-        store.applyRecurringTasks(recurring.tasks, to: Date())
+        store.applyRecurringTasks(recurring.tasks, to: Date(),
+                                  header: AppSettings.shared.effectiveRecurringTaskHeader)
         store.applyDeadlines(deadlines.deadlines, to: Date())
         if isFirstToday, AppSettings.shared.autoCarryForward {
-            _ = store.carryForward()
+            _ = store.carryForward(excludingContentKeys: recurringCarryExclusions)
         }
         ensureTodayExists()
         lastAppliedDay = today

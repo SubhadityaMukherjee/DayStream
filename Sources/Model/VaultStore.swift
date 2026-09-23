@@ -23,19 +23,27 @@ struct JournalDay: Identifiable {
     /// visible cell, and walking every block of every file per access was
     /// O(total blocks) per SwiftUI evaluation.
     private(set) var hasOpenTodos = false
+    /// Cached open (TODO/DOING/LATER/NOW) task count — feeds the
+    /// open-task bubbles above the stream without a re-walk per render.
+    private(set) var openTodoCount = 0
 
     var id: Date { date }
 
     mutating func refreshOpenTodos() {
         var found = false
+        var openCount = 0
         func walk(_ nodes: [Block]) {
             for n in nodes {
-                if n.todoState == .open { found = true }
+                if n.todoState == .open {
+                    found = true
+                    openCount += 1
+                }
                 walk(n.children)
             }
         }
         files.forEach { walk($0.blocks) }
         hasOpenTodos = found
+        openTodoCount = openCount
     }
 
     /// The file editing and saving target: prefers a content-bearing file so an
@@ -64,6 +72,14 @@ final class VaultStore {
     let pagesURL: URL
     private(set) var days: [JournalDay] = []          // newest first
     private(set) var pageCount: Int = 0
+    /// Open tasks across every journal day, cached alongside `days` so the
+    /// stream's counter bubble never re-walks the vault per render.
+    private(set) var openTaskCountTotal = 0
+    /// Open tasks in today's note (0 when today has no note yet).
+    var openTaskCountToday: Int {
+        let today = JournalDate.startOfDay(Date())
+        return days.first(where: { $0.date == today })?.openTodoCount ?? 0
+    }
 
     var onExternalChange: (() -> Void)?
 
@@ -190,6 +206,7 @@ final class VaultStore {
     private func applySnapshot(days newDays: [JournalDay], pageCount newPageCount: Int) {
         days = newDays
         pageCount = newPageCount
+        openTaskCountTotal = newDays.reduce(0) { $0 + $1.openTodoCount }
         pageNamesCache = nil
     }
 
@@ -345,8 +362,10 @@ final class VaultStore {
         }
         if let dayIndex = days.firstIndex(where: { $0.date == file.date }) {
             if let fileIndex = days[dayIndex].files.firstIndex(where: { $0.url == file.url }) {
+                let oldOpenCount = days[dayIndex].openTodoCount
                 days[dayIndex].files[fileIndex] = file
                 days[dayIndex].refreshOpenTodos()
+                openTaskCountTotal += days[dayIndex].openTodoCount - oldOpenCount
             } else {
                 reload()
             }
@@ -434,13 +453,77 @@ final class VaultStore {
         return true
     }
 
-    /// Prepends every task due on `date` to that day's note. Duplicate-checked
-    /// per task, so this is safe to run on every launch, reload and rollover.
+    /// Line index of the note's recurring-task section header, if present:
+    /// an outliner bullet (`- [[ADMIN]]`), a markdown heading (`## [[ADMIN]]`)
+    /// or a standalone `[[ADMIN]]` line — case-insensitive so hand-typed
+    /// headers match. Whitespace-only or empty `header` falls back to ADMIN.
+    static func recurringHeaderLineIndex(header: String = "ADMIN", in text: String) -> Int? {
+        let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmed.isEmpty ? "ADMIN" : trimmed
+        let pattern = "^([-*]\\s*)?(#{1,6}\\s*)?\\[\\[\\s*"
+            + NSRegularExpression.escapedPattern(for: name)
+            + "\\s*\\]\\]\\s*$"
+        let lines = text.components(separatedBy: "\n")
+        return lines.firstIndex {
+            $0.trimmingCharacters(in: .whitespaces).range(
+                of: pattern, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+    }
+
+    /// Writes `- TODO <title>` (with an `added::` timestamp) under the day's
+    /// recurring-task section header (`[[ADMIN]]` unless `header` says
+    /// otherwise), creating the header at the top of the note when missing.
+    /// Duplicate-checked against the note's existing content, so
+    /// re-applying is a no-op. Returns false when the task was already
+    /// present (or empty).
     @discardableResult
-    func applyRecurringTasks(_ tasks: [RecurringTask], to date: Date = Date()) -> Int {
+    func addRecurringTask(_ title: String, to date: Date, header: String = "ADMIN") -> Bool {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else { return false }
+        let (url, existing) = ensureDayFile(for: date)
+        let existingKeys = BlockTree.allContentKeys(BlockTree.parse(existing))
+        guard !existingKeys.contains(BlockTree.normalize(trimmedTitle)) else { return false }
+
+        let trimmedHeader = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        let name = trimmedHeader.isEmpty ? "ADMIN" : trimmedHeader
+        let entry = ["- TODO " + trimmedTitle, "\tadded:: " + NoteFormatter.timestamp(Date())]
+        var newText: String
+        if let index = Self.recurringHeaderLineIndex(header: header, in: existing) {
+            var lines = existing.components(separatedBy: "\n")
+            // Bullet-form headers (`- [[ADMIN]]`) keep their tasks as
+            // indented children; heading/bare forms take top-level bullets.
+            let headerLine = lines[index].trimmingCharacters(in: .whitespaces)
+            let isBullet = headerLine.hasPrefix("- ") || headerLine.hasPrefix("* ")
+            lines.insert(contentsOf: entry.map { (isBullet ? "\t" : "") + $0 }, at: index + 1)
+            newText = lines.joined(separator: "\n")
+        } else {
+            let section = ["- [[" + name + "]]"] + entry.map { "\t" + $0 }
+            let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                newText = section.joined(separator: "\n") + "\n"
+            } else {
+                newText = section.joined(separator: "\n") + "\n\n" + trimmed + "\n"
+            }
+        }
+        if !newText.hasSuffix("\n") { newText += "\n" }
+        write(text: newText, to: url)
+        if !days.contains(where: { $0.date == JournalDate.startOfDay(date) }) {
+            reload()
+        }
+        return true
+    }
+
+    /// Seeds every task due on `date` into that day's note, grouped under
+    /// each task's own header (falling back to the passed default, ADMIN).
+    /// Duplicate-checked per task, so this is safe to run on every launch,
+    /// reload and rollover.
+    @discardableResult
+    func applyRecurringTasks(_ tasks: [RecurringTask], to date: Date = Date(),
+                             header: String = "ADMIN") -> Int {
         var added = 0
         for task in tasks where task.isDue(on: date) {
-            if addTask(task.title, to: date, atTop: true) {
+            let own = task.header?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if addRecurringTask(task.title, to: date, header: own.isEmpty ? header : own) {
                 added += 1
             }
         }
@@ -643,14 +726,19 @@ final class VaultStore {
 
     /// Copies unfinished tasks from before `target` into that date's note.
     /// Duplicate-checked against the target, so it is safe to re-run.
+    /// `excludingContentKeys` (normalized task titles) are never carried —
+    /// AppModel passes recurring-task titles so recurrence, not carry-over,
+    /// owns when they reappear.
     @discardableResult
-    func carryForward(to target: Date) -> CarryResult {
+    func carryForward(to target: Date = Date(), excludingContentKeys: Set<String> = Set()) -> CarryResult {
         let day = JournalDate.startOfDay(target)
         let (targetURL, targetText) = ensureDayFile(for: day)
         let previous = days
             .filter { $0.date < day }
             .flatMap { d in d.files.map { (date: d.date, text: $0.text) } }
-        let (newText, result) = CarryForwardService.carryForward(allFiles: previous, todayText: targetText)
+        let (newText, result) = CarryForwardService.carryForward(
+            allFiles: previous, todayText: targetText,
+            excludingContentKeys: excludingContentKeys)
         if result.carriedCount > 0 {
             write(text: newText, to: targetURL)
             if !days.contains(where: { $0.date == day }) {

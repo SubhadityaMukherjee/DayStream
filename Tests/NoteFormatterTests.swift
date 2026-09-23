@@ -159,20 +159,74 @@ final class RecurringTaskTests: XCTestCase {
     }
 
     func testDailyIsDueEveryDay() {
-        let task = RecurringTask(title: "Plan the day", schedule: .daily)
+        let task = RecurringTask(title: "Plan the day", schedule: .daily,
+                                 startDate: date("2026-08-01"))
         XCTAssertTrue(task.isDue(on: date("2026-08-18"), calendar: cal))
         XCTAssertTrue(task.isDue(on: date("2026-08-19"), calendar: cal))
     }
 
     func testWeeklyOnlyOnItsWeekday() {
         // 2026-08-18 is a Tuesday.
-        let task = RecurringTask(title: "Weekly review", schedule: .weekly(weekday: 3))
+        let task = RecurringTask(title: "Weekly review", schedule: .weekly(weekday: 3),
+                                 startDate: date("2026-08-01"))
         XCTAssertTrue(task.isDue(on: date("2026-08-18"), calendar: cal))
         XCTAssertFalse(task.isDue(on: date("2026-08-19"), calendar: cal))
     }
 
+    func testBiweeklyIsEveryOtherWeekOnItsWeekday() {
+        // 2026-09-03 is a Thursday.
+        let task = RecurringTask(title: "Deep clean", schedule: .biweekly(weekday: 5),
+                                 startDate: date("2026-09-01"))
+        let anchor = date("2026-09-03")
+        // The week it was added is due; the week between is not; the
+        // fortnight after is due again.
+        XCTAssertTrue(task.isDue(on: anchor, calendar: cal))
+        XCTAssertFalse(task.isDue(on: cal.date(byAdding: .day, value: 7, to: anchor)!, calendar: cal))
+        XCTAssertTrue(task.isDue(on: cal.date(byAdding: .day, value: 14, to: anchor)!, calendar: cal))
+        XCTAssertFalse(task.isDue(on: date("2026-09-04"), calendar: cal), "wrong weekday is never due")
+        XCTAssertTrue(task.scheduleDescription(calendar: cal).hasPrefix("Bi-weekly on "))
+    }
+
+    func testRecurringNeverFiresBeforeItsAddDate() {
+        let daily = RecurringTask(title: "Daily", schedule: .daily, startDate: date("2026-09-01"))
+        XCTAssertFalse(daily.isDue(on: date("2026-08-31"), calendar: cal))
+        XCTAssertTrue(daily.isDue(on: date("2026-09-01"), calendar: cal))
+
+        // 2026-09-03 is a Thursday; same weekday the week before adding.
+        let biweekly = RecurringTask(title: "Bi", schedule: .biweekly(weekday: 5),
+                                     startDate: date("2026-09-03"))
+        XCTAssertFalse(biweekly.isDue(on: date("2026-08-27"), calendar: cal))
+        XCTAssertTrue(biweekly.isDue(on: date("2026-09-03"), calendar: cal))
+    }
+
+    func testBiweeklyCodableRoundTrip() throws {
+        let suite = "daystream-tests-recurring-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = RecurringTaskStore(defaults: defaults)
+        store.add(RecurringTask(title: "Biweekly thing", schedule: .biweekly(weekday: 5), header: "WORK"))
+        let reloaded = RecurringTaskStore(defaults: defaults).tasks
+        XCTAssertEqual(reloaded.first?.schedule, .biweekly(weekday: 5))
+        XCTAssertEqual(reloaded.first?.header, "WORK")
+    }
+
+    func testLegacyJSONWithoutHeaderDecodes() throws {
+        // Pre-header persisted tasks must keep decoding (header = nil).
+        let legacy = """
+        [{"id":"E621E1DD-CC5D-4C87-9B5A-0B1C1B6E8F01","title":"Old task","schedule":{"daily":{}}}]
+        """
+        let tasks = try JSONDecoder().decode([RecurringTask].self, from: Data(legacy.utf8))
+        XCTAssertEqual(tasks.count, 1)
+        XCTAssertNil(tasks[0].header)
+        XCTAssertEqual(tasks[0].schedule, .daily)
+        XCTAssertEqual(tasks[0].startDate, Date(timeIntervalSince1970: 0),
+                       "legacy tasks anchor at the epoch so their pattern is unchanged")
+    }
+
     func testOnceOnlyOnItsDate() {
-        let task = RecurringTask(title: "Renew passport", schedule: .once(date: date("2026-09-01")))
+        let task = RecurringTask(title: "Renew passport", schedule: .once(date: date("2026-09-01")),
+                                 startDate: date("2026-08-01"))
         XCTAssertTrue(task.isDue(on: date("2026-09-01"), calendar: cal))
         XCTAssertFalse(task.isDue(on: date("2026-09-02"), calendar: cal))
     }
@@ -372,6 +426,121 @@ final class VaultTaskAndSearchTests: XCTestCase {
         XCTAssertEqual(
             try String(contentsOf: journals.appendingPathComponent(JournalDate.filename(for: day)), encoding: .utf8),
             first)
+    }
+
+    func testRecurringTasksCreateAdminHeader() throws {
+        try "- existing note line\n".write(
+            to: journals.appendingPathComponent("2026-08-19.md"), atomically: true, encoding: .utf8)
+        let store = makeStore()
+
+        XCTAssertTrue(store.addRecurringTask("Standup", to: try utc("2026-08-19")))
+        let text = try String(contentsOf: journals.appendingPathComponent("2026-08-19.md"), encoding: .utf8)
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines[0], "- [[ADMIN]]")
+        XCTAssertEqual(lines[1], "\t- TODO Standup")
+        XCTAssertTrue(lines[2].hasPrefix("\t\tadded:: "))
+        XCTAssertEqual(lines[4], "- existing note line")
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: text), 0)
+    }
+
+    func testRecurringTasksReuseExistingAdminHeader() throws {
+        try "## [[ADMIN]]\n- TODO Morning reset\n\tadded:: 2026-08-01 08:00\n\n- other stuff\n".write(
+            to: journals.appendingPathComponent("2026-08-20.md"), atomically: true, encoding: .utf8)
+        let store = makeStore()
+
+        XCTAssertTrue(store.addRecurringTask("Standup", to: try utc("2026-08-20")))
+        let text = try String(contentsOf: journals.appendingPathComponent("2026-08-20.md"), encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "\n").filter { $0 == "## [[ADMIN]]" }.count, 1,
+                       "header must not be duplicated")
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines[0], "## [[ADMIN]]")
+        XCTAssertEqual(lines[1], "- TODO Standup")
+        XCTAssertTrue(lines[2].hasPrefix("\tadded:: "))
+        XCTAssertEqual(lines[3], "- TODO Morning reset")
+        XCTAssertTrue(text.contains("- other stuff"))
+    }
+
+    func testRecurringTasksReuseBulletFormHeaderIndented() throws {
+        try "- [[ADMIN]]\n\t- TODO Morning reset\n\tadded:: 2026-08-01 08:00\n\n- other stuff\n".write(
+            to: journals.appendingPathComponent("2026-08-21.md"), atomically: true, encoding: .utf8)
+        let store = makeStore()
+
+        XCTAssertTrue(store.addRecurringTask("Standup", to: try utc("2026-08-21")))
+        let text = try String(contentsOf: journals.appendingPathComponent("2026-08-21.md"), encoding: .utf8)
+        XCTAssertEqual(text.components(separatedBy: "\n").filter { $0 == "- [[ADMIN]]" }.count, 1,
+                       "bullet header must not be duplicated")
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines[0], "- [[ADMIN]]")
+        XCTAssertEqual(lines[1], "\t- TODO Standup", "tasks nest as children of the bullet header")
+        XCTAssertTrue(lines[2].hasPrefix("\t\tadded:: "))
+        XCTAssertEqual(lines[3], "\t- TODO Morning reset")
+        XCTAssertTrue(text.contains("- other stuff"))
+    }
+
+    func testRecurringTasksUseCustomHeader() throws {
+        let store = makeStore()
+        let day = Date()
+
+        XCTAssertTrue(store.addRecurringTask("Standup", to: day, header: "ROUTINE"))
+        let text = try String(contentsOf: journals.appendingPathComponent(JournalDate.filename(for: day)), encoding: .utf8)
+        XCTAssertTrue(text.hasPrefix("- [[ROUTINE]]\n\t- TODO Standup\n"))
+        XCTAssertFalse(text.contains("ADMIN"))
+
+        // Re-applying with the custom header reuses it (no ADMIN fallback,
+        // no duplicate ROUTINE header).
+        XCTAssertTrue(store.addRecurringTask("Stretch", to: day, header: "ROUTINE"))
+        let updated = try String(contentsOf: journals.appendingPathComponent(JournalDate.filename(for: day)), encoding: .utf8)
+        XCTAssertEqual(updated.components(separatedBy: "\n").filter { $0 == "- [[ROUTINE]]" }.count, 1)
+        XCTAssertTrue(updated.contains("\t- TODO Stretch"))
+    }
+
+    func testRecurringTasksUsePerTaskHeader() throws {
+        let store = makeStore()
+        let day = Date()
+        let tasks = [
+            RecurringTask(title: "Standup", schedule: .daily, header: "WORK"),
+            RecurringTask(title: "Meditate", schedule: .daily),
+        ]
+
+        XCTAssertEqual(store.applyRecurringTasks(tasks, to: day, header: "ROUTINE"), 2)
+        let text = try String(contentsOf: journals.appendingPathComponent(JournalDate.filename(for: day)), encoding: .utf8)
+        XCTAssertTrue(text.contains("- [[WORK]]\n\t- TODO Standup"), "task header overrides the default")
+        XCTAssertTrue(text.contains("- [[ROUTINE]]\n\t- TODO Meditate"), "unset header falls back to the passed default")
+    }
+
+    func testRecurringTaskSeedsIntoTodayNoteWithRealInstant() throws {
+        // The user flow: "add task for today's weekday in Settings" — a raw
+        // Date() with a time-of-day component must resolve to today's local
+        // file, not the UTC-adjacent day.
+        let now = Date()
+        try "- already here\n".write(
+            to: journals.appendingPathComponent(JournalDate.filename(for: now)),
+            atomically: true, encoding: .utf8)
+        let store = makeStore()
+
+        let weekday = Calendar.current.component(.weekday, from: now)
+        let task = RecurringTask(title: "Weekly thursday thing", schedule: .weekly(weekday: weekday))
+        XCTAssertTrue(store.addRecurringTask(task.title, to: now, header: "ADMIN"))
+
+        let text = try String(
+            contentsOf: journals.appendingPathComponent(JournalDate.filename(for: now)),
+            encoding: .utf8)
+        XCTAssertTrue(text.contains("- [[ADMIN]]"))
+        XCTAssertTrue(text.contains("\t- TODO Weekly thursday thing"))
+        XCTAssertTrue(text.contains("- already here"))
+    }
+
+    func testRecurringHeaderLineIndexMatchesVariants() {
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: "## [[ADMIN]]\n- TODO x"), 0)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: "- stuff\n\n# [[admin]]\n"), 2)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: "[[ADMIN]]\n"), 0)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: "- [[ADMIN]]\n\t- TODO x\n"), 0)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(in: "* [[admin]]\n"), 0)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(header: "Routine", in: "- a\n## [[routine]]\n"), 1)
+        XCTAssertEqual(VaultStore.recurringHeaderLineIndex(header: "  ", in: "- [[ADMIN]]\n"), 0,
+                       "blank header falls back to ADMIN")
+        XCTAssertNil(VaultStore.recurringHeaderLineIndex(in: "- TODO visit [[ADMIN]] page\n"))
+        XCTAssertNil(VaultStore.recurringHeaderLineIndex(in: "## [[ADMINISTRATION]]\n"))
     }
 
     func testToggleTodoStampsCompletion() throws {

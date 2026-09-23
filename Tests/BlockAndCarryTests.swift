@@ -182,6 +182,31 @@ final class CarryForwardTests: XCTestCase {
         XCTAssertEqual(result.carriedCount, 0)
     }
 
+    func testExcludedKeysNeverCarry() {
+        let yesterday = "- TODO Pay rent\n- TODO Write report\n"
+        let (newText, result) = CarryForwardService.carryForward(
+            allFiles: [(date: utcDate("2026-08-17"), text: yesterday)],
+            todayText: "",
+            excludingContentKeys: [BlockTree.normalize("pay rent")]
+        )
+        XCTAssertEqual(result.carriedCount, 1)
+        XCTAssertFalse(newText.contains("Pay rent"), "excluded (recurring) titles never carry over")
+        XCTAssertTrue(newText.contains("Write report"))
+    }
+
+    func testExcludedKeyStillSkipsAlreadyOnTodayCounting() {
+        // An excluded title already on today neither carries nor counts.
+        let yesterday = "- TODO Pay rent\n"
+        let today = "- TODO pay rent\n"
+        let (_, result) = CarryForwardService.carryForward(
+            allFiles: [(date: utcDate("2026-08-17"), text: yesterday)],
+            todayText: today,
+            excludingContentKeys: [BlockTree.normalize("Pay rent")]
+        )
+        XCTAssertEqual(result.carriedCount, 0)
+        XCTAssertEqual(result.skippedAlreadyToday, 0)
+    }
+
     func testGroupsTasksSharingAncestorChain() {
         let yesterday = """
         - [[ALFIE]]

@@ -20,6 +20,10 @@ struct MainView: View {
                         FloatingSearchView()
                             .padding(20)
                     }
+                    .overlay(alignment: .top) {
+                        OpenTaskCounterView(store: store)
+                            .padding(.top, 10)
+                    }
             }
         }
         .frame(minWidth: 900, minHeight: 600)
@@ -122,6 +126,7 @@ private struct SidebarView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @State private var showNewDeadline = false
+    @State private var showSummarize = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -186,6 +191,17 @@ private struct SidebarView: View {
                     .disabled(appModel.isGitBackingUp)
                     .help("Commit the vault and push to its git remote")
                 }
+
+                Button {
+                    showSummarize = true
+                } label: {
+                    Label("Summarize", systemImage: "doc.text.magnifyingglass")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .glassButtonStyle()
+                .controlSize(.regular)
+                .disabled(appModel.store == nil)
+                .help("Merge notes from a chosen day through today into one read-only summary")
             }
             .glassContainer()
             .padding(.horizontal, 12)
@@ -222,6 +238,9 @@ private struct SidebarView: View {
         .sheet(isPresented: $showNewDeadline) {
             NewDeadlineSheet()
                 .frame(minWidth: 380, minHeight: 240)
+        }
+        .sheet(isPresented: $showSummarize) {
+            SummarizeSheet()
         }
     }
 
@@ -577,4 +596,41 @@ struct FloatingSearchView: View {
         f.timeStyle = .none
         return f
     }()
+}
+
+/// Pinned green bubbles above the stream: open tasks in today's note and
+/// across every note in the vault. Counts come cached from `VaultStore`, so
+/// rendering never re-walks the days.
+private struct OpenTaskCounterView: View {
+    @Environment(AppModel.self) private var appModel
+    let store: VaultStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            bubble("Today", store.openTaskCountToday)
+            bubble("All", store.openTaskCountTotal)
+        }
+    }
+
+    private func bubble(_ label: String, _ count: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle")
+                .font(.system(size: 7.5, weight: .semibold))
+            Text("\(label): \(count)")
+                .monospacedDigit()
+        }
+        .font(.system(size: 11.5, weight: .semibold))
+        .foregroundStyle(.green)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.green.opacity(0.14)))
+        .overlay(Capsule().strokeBorder(Color.green.opacity(0.25)))
+        .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+        .help(label == "Today"
+              ? "\(count) open task\(count == 1 ? "" : "s") in today's note"
+              : "\(count) open task\(count == 1 ? "" : "s") across every note in the vault")
+        .onTapGesture {
+            if label == "Today" { appModel.goToToday() }
+        }
+    }
 }

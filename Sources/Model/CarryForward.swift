@@ -27,8 +27,12 @@ struct CarryResult: Equatable {
 enum CarryForwardService {
 
     /// `allFiles` must be sorted newest-first; for tasks appearing on multiple
-    /// days, the most recent occurrence wins.
-    static func carryForward(allFiles: [(date: Date, text: String)], todayText: String)
+    /// days, the most recent occurrence wins. `excludingContentKeys` are
+    /// normalized task titles that must never carry over — recurring tasks,
+    /// whose recurrence seeds them fresh on the days they are due (an open
+    /// copy otherwise follows the user every single day).
+    static func carryForward(allFiles: [(date: Date, text: String)], todayText: String,
+                             excludingContentKeys: Set<String> = Set())
         -> (newTodayText: String, result: CarryResult)
     {
         let todayBlocks = BlockTree.parse(todayText)
@@ -47,6 +51,9 @@ enum CarryForwardService {
             for entry in tasks {
                 let key = BlockTree.normalize(entry.task.content)
                 guard !key.isEmpty else { continue }
+                if excludingContentKeys.contains(key) {
+                    continue
+                }
                 if todayKeys.contains(key) {
                     skippedAlreadyToday += 1
                     continue
