@@ -20,6 +20,10 @@ struct MainView: View {
                         FloatingSearchView()
                             .padding(20)
                     }
+                    .overlay(alignment: .top) {
+                        OpenTaskCounterView(store: store)
+                            .padding(.top, 10)
+                    }
             }
         }
         .frame(minWidth: 900, minHeight: 600)
@@ -61,10 +65,30 @@ struct MainView: View {
         } message: {
             Text(appModel.gitBackupResult?.message ?? "")
         }
+        .alert(
+            "Vault Error",
+            isPresented: Binding(
+                get: { appModel.store?.storageErrorMessage != nil },
+                set: { if !$0 { appModel.store?.clearStorageError() } }
+            )
+        ) {
+            Button("OK") { appModel.store?.clearStorageError() }
+        } message: {
+            Text(appModel.store?.storageErrorMessage ?? "")
+        }
         .onAppear {
             appModel.goToToday()
         }
     }
+
+    /// POSIX formatter for daystream://date links; per-link allocation was
+    /// pure waste in a deep-link hot path.
+    private static let linkDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     private func handleInternalURL(_ url: URL) -> Bool {
         guard url.scheme == "daystream" else { return false }
@@ -77,10 +101,7 @@ struct MainView: View {
             }
         case "date":
             if let value = comps?.queryItems?.first(where: { $0.name == "value" })?.value {
-                let f = DateFormatter()
-                f.locale = Locale(identifier: "en_US_POSIX")
-                f.dateFormat = "yyyy-MM-dd"
-                if let date = f.date(from: value) {
+                if let date = Self.linkDayFormatter.date(from: value) {
                     let target = JournalDate.startOfDay(date)
                     // If a page sheet is open, close it and reveal once the
                     // dismissal completes; otherwise reveal right away.
@@ -105,6 +126,7 @@ private struct SidebarView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.openSettings) private var openSettings
     @State private var showNewDeadline = false
+    @State private var showSummarize = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -169,6 +191,17 @@ private struct SidebarView: View {
                     .disabled(appModel.isGitBackingUp)
                     .help("Commit the vault and push to its git remote")
                 }
+
+                Button {
+                    showSummarize = true
+                } label: {
+                    Label("Summarize", systemImage: "doc.text.magnifyingglass")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .glassButtonStyle()
+                .controlSize(.regular)
+                .disabled(appModel.store == nil)
+                .help("Merge notes from a chosen day through today into one read-only summary")
             }
             .glassContainer()
             .padding(.horizontal, 12)
@@ -196,9 +229,18 @@ private struct SidebarView: View {
             }
         }
         .padding(.top, 16)
+        .onChange(of: settings.gitBackupEnabled) { _, _ in
+            appModel.refreshGitBackupAvailability()
+        }
+        .onChange(of: settings.gitBackupPath) { _, _ in
+            appModel.refreshGitBackupAvailability()
+        }
         .sheet(isPresented: $showNewDeadline) {
             NewDeadlineSheet()
                 .frame(minWidth: 380, minHeight: 240)
+        }
+        .sheet(isPresented: $showSummarize) {
+            SummarizeSheet()
         }
     }
 
@@ -337,9 +379,12 @@ private struct NewDeadlineSheet: View {
 /// Journals jump to their day; pages open in a sheet.
 struct FloatingSearchView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.openSettings) private var openSettings
     @State private var expanded = false
     @State private var query = ""
     @State private var hits: [VaultStore.SearchHit] = []
+    /// Keyboard-selected hit (↑/↓ in the field); nil = top match on ⏎.
+    @State private var selection: Int?
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -348,7 +393,10 @@ struct FloatingSearchView: View {
                 panel
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            toggleButton
+            HStack(spacing: 10) {
+                shortcutsButton
+                toggleButton
+            }
         }
         .onChange(of: appModel.searchRequest) { _, _ in
             openPanel()
@@ -388,6 +436,24 @@ struct FloatingSearchView: View {
         .help("Search all notes and pages (⌘F)")
     }
 
+    /// Shortcut reference one hop away: opens Settings on the Shortcuts tab
+    /// (same landing pattern as the sidebar's Recurring Tasks…).
+    private var shortcutsButton: some View {
+        Button {
+            appModel.requestedSettingsTab = .shortcuts
+            openSettings()
+        } label: {
+            Image(systemName: "command")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 40, height: 40)
+                .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .floatingPanelBackground(in: Circle())
+        .help("Keyboard shortcuts")
+    }
+
     /// Field + top matches in one glass panel. Content-sized: a "more" footer
     /// instead of an inner scroll view (scroll views are greedy and break sizing).
     private var panel: some View {
@@ -395,11 +461,11 @@ struct FloatingSearchView: View {
             field
             if !hits.isEmpty {
                 Divider().padding(.vertical, 4)
-                ForEach(hits.prefix(8)) { hit in
-                    row(hit)
+                ForEach(Array(hits.prefix(8).enumerated()), id: \.element.id) { index, hit in
+                    row(hit, index: index)
                 }
                 if hits.count > 8 {
-                    Text("\(hits.count - 8) more — press ⏎ for the top match")
+                    Text("\(hits.count - 8) more — press ⏎ for the selected match")
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 10)
@@ -428,11 +494,17 @@ struct FloatingSearchView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($focused)
-                .onSubmit { openFirstHit() }
+                .onSubmit { openSelectedHit() }
+                // Keyboard navigation while the field holds focus: ↑/↓ pick
+                // a hit, ⏎ opens it. Handled here (not via key monitors) so
+                // the events only ever apply to this field.
+                .onKeyPress(.upArrow) { moveSelection(-1) }
+                .onKeyPress(.downArrow) { moveSelection(1) }
             if !query.isEmpty {
                 Button {
                     query = ""
                     hits = []
+                    selection = nil
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 12))
@@ -448,23 +520,27 @@ struct FloatingSearchView: View {
             let trimmed = query.trimmingCharacters(in: .whitespaces)
             guard !trimmed.isEmpty else {
                 hits = []
+                selection = nil
                 return
             }
             try? await Task.sleep(for: .milliseconds(150))
             guard !Task.isCancelled else { return }
-            hits = appModel.store?.search(trimmed, limit: 20) ?? []
+            // Off-main scan: the vault-wide search used to hitch the whole
+            // UI on every keystroke pause with a large vault.
+            hits = await appModel.store?.searchAsync(trimmed, limit: 20) ?? []
+            selection = nil
         }
     }
 
-    private func row(_ hit: VaultStore.SearchHit) -> some View {
+    private func row(_ hit: VaultStore.SearchHit, index: Int) -> some View {
         Button {
             open(hit)
         } label: {
             VStack(alignment: .leading, spacing: 1) {
-                Text(hit.isPage ? "Page · \(hit.title)" : Self.dayFormatter.string(from: hit.date!))
+                Text(hit.isPage ? "Page · \(hit.title)" : hit.date.map { Self.dayFormatter.string(from: $0) } ?? hit.title)
                     .font(.caption2.weight(.medium))
                     .foregroundStyle(.secondary)
-                if hit.lineText != "Page" {
+                if !hit.isTitleMatch {
                     Text(hit.lineText)
                         .font(.system(size: 12.5))
                         .lineLimit(1)
@@ -475,9 +551,25 @@ struct FloatingSearchView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
+            .background(selection == index ? Color.accentColor.opacity(0.12) : .clear)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
+    }
+
+    private func moveSelection(_ delta: Int) -> KeyPress.Result {
+        guard !hits.isEmpty else { return .ignored }
+        let current = selection ?? 0
+        selection = min(max(current + delta, 0), min(hits.count, 8) - 1)
+        return .handled
+    }
+
+    private func openSelectedHit() {
+        if let selection, hits.indices.contains(selection) {
+            open(hits[selection])
+        } else {
+            openFirstHit()
+        }
     }
 
     private func openFirstHit() {
@@ -504,4 +596,41 @@ struct FloatingSearchView: View {
         f.timeStyle = .none
         return f
     }()
+}
+
+/// Pinned green bubbles above the stream: open tasks in today's note and
+/// across the last three months of notes. Per-day counts are cached in
+/// `VaultStore`, so rendering never re-walks the vault.
+private struct OpenTaskCounterView: View {
+    @Environment(AppModel.self) private var appModel
+    let store: VaultStore
+
+    var body: some View {
+        HStack(spacing: 8) {
+            bubble("Today", store.openTaskCountToday)
+            bubble("All", store.openTaskCountTotal)
+        }
+    }
+
+    private func bubble(_ label: String, _ count: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "circle")
+                .font(.system(size: 7.5, weight: .semibold))
+            Text("\(label): \(count)")
+                .monospacedDigit()
+        }
+        .font(.system(size: 11.5, weight: .semibold))
+        .foregroundStyle(.green)
+        .padding(.horizontal, 11)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.green.opacity(0.14)))
+        .overlay(Capsule().strokeBorder(Color.green.opacity(0.25)))
+        .shadow(color: .black.opacity(0.08), radius: 2, y: 1)
+        .help(label == "Today"
+              ? "\(count) open task\(count == 1 ? "" : "s") in today's note"
+              : "\(count) open task\(count == 1 ? "" : "s") across the last three months of notes")
+        .onTapGesture {
+            if label == "Today" { appModel.goToToday() }
+        }
+    }
 }

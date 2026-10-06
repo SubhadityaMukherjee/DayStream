@@ -25,10 +25,12 @@ final class GlobalQuickAddController {
     }
 
     private func fire() {
+        // No window opener captured yet (app still launching, window scene
+        // never materialized): bail instead of silently creating a todo the
+        // user can't see.
+        guard let openWindow = MainWindowOpener.openWindow else { return }
         NSApp.activate(ignoringOtherApps: true)
-        if let openWindow = MainWindowOpener.openWindow {
-            openWindow(id: "main")
-        }
+        openWindow(id: "main")
         AppModel.shared.newTodoToday()
     }
 }

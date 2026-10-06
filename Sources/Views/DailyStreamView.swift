@@ -68,17 +68,16 @@ struct DailyStreamView: View {
         .background(Color(nsColor: .textBackgroundColor))
     }
 
-    /// Scroll attempts at increasing delays: the first runs before newly
-    /// loaded sections are realized (the list builds lazily), so retries
-    /// after layout passes are what actually land on days far outside the
-    /// visible window (e.g. a search hit 300 days back).
+    /// Instant jump first (no animation — animated far scrolls stutter
+    /// through intermediate positions), then unanimated retries after
+    /// layout passes: the first runs before newly loaded sections are
+    /// realized, and targets far outside the materialized window (a search
+    /// hit 300 days back) need those later passes to land.
     private func scrollTo(proxy: ScrollViewProxy, target: Date) {
         proxy.scrollTo(target, anchor: .top)
-        for delay in [0.05, 0.2, 0.5] {
+        for delay in [0.1, 0.3] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                withAnimation(.easeOut(duration: 0.25)) {
-                    proxy.scrollTo(target, anchor: .top)
-                }
+                proxy.scrollTo(target, anchor: .top)
             }
         }
     }

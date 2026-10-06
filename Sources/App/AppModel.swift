@@ -20,9 +20,17 @@ final class AppModel {
 
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
+    let remindersSync = RemindersSyncEngine()
+
+    /// Normalized titles of all recurring tasks — never carried forward
+    /// (their recurrence seeds them on the days they're due), or an open
+    /// copy would trail the user every following day.
+    private var recurringCarryExclusions: Set<String> {
+        Set(recurring.tasks.map { BlockTree.normalize($0.title) })
+    }
 
     enum SettingsTab: Int {
-        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4
+        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4, reminders = 5
     }
 
     /// Set alongside `openSettings()` to land on a specific tab; SettingsView
@@ -122,13 +130,22 @@ final class AppModel {
            let repo = GitBackup.containingRepo(for: store.vaultRootURL) {
             AppSettings.shared.gitBackupPath = repo.path
         }
+        refreshGitBackupAvailability()
+        // Reminders mirror: hooks every vault mutation; only talks to
+        // EventKit when the user turned it on (access prompt is opt-in).
+        remindersSync.attach(store: store)
+        if AppSettings.shared.remindersSyncEnabled {
+            Task { await remindersSync.enable() }
+        }
         ensureTodayExists()
         applyScheduledForToday()
     }
 
     func disconnectVault() {
         UserDefaults.standard.removeObject(forKey: Self.vaultPathKey)
+        remindersSync.detach()
         store = nil
+        canGitBackupFromSidebar = false
     }
 
     func ensureTodayExists() {
@@ -152,7 +169,8 @@ final class AppModel {
         let day = JournalDate.startOfDay(date)
         let isNewDate = !store.days.contains { $0.date == day }
         store.ensureDayFile(for: day)
-        store.applyRecurringTasks(recurring.tasks, to: day)
+        store.applyRecurringTasks(recurring.tasks, to: day,
+                                  header: AppSettings.shared.effectiveRecurringTaskHeader)
         store.applyDeadlines(deadlines.deadlines, to: day)
         if !store.days.contains(where: { $0.date == day }) {
             store.reload()
@@ -160,7 +178,7 @@ final class AppModel {
         // A brand-new date note starts with whatever was still unfinished
         // before that day (duplicate-checked, so revisiting is a no-op).
         if isNewDate, AppSettings.shared.carryForwardOnNewDate {
-            _ = store.carryForward(to: day)
+            _ = store.carryForward(to: day, excludingContentKeys: recurringCarryExclusions)
         }
         reveal(day: day)
     }
@@ -187,7 +205,7 @@ final class AppModel {
 
     func runCarryForward() {
         guard let store else { return }
-        let result = store.carryForward()
+        let result = store.carryForward(excludingContentKeys: recurringCarryExclusions)
         carrySummary = result
         ensureTodayExists()
     }
@@ -198,6 +216,17 @@ final class AppModel {
     /// triggered from (sidebar or Settings → Advanced).
     var gitBackupResult: GitBackup.Result?
     var isGitBackingUp = false
+
+    /// Cached sidebar-button availability: `GitBackup.isGitRepo` touches
+    /// the filesystem, which must not run inside every `SidebarView` body
+    /// evaluation. Refreshed on vault setup and on settings changes.
+    private(set) var canGitBackupFromSidebar = false
+
+    func refreshGitBackupAvailability() {
+        canGitBackupFromSidebar = AppSettings.shared.gitBackupEnabled
+            && !AppSettings.shared.gitBackupPath.isEmpty
+            && GitBackup.isGitRepo(URL(fileURLWithPath: AppSettings.shared.gitBackupPath))
+    }
 
     func runGitBackup(automatic: Bool = false) {
         guard !isGitBackingUp else { return }
@@ -247,14 +276,6 @@ final class AppModel {
         runGitBackup(automatic: true)
     }
 
-    /// True when the sidebar backup button should be shown.
-    var canGitBackupFromSidebar: Bool {
-        guard AppSettings.shared.gitBackupEnabled, !AppSettings.shared.gitBackupPath.isEmpty else {
-            return false
-        }
-        return GitBackup.isGitRepo(URL(fileURLWithPath: AppSettings.shared.gitBackupPath))
-    }
-
     // MARK: - Scheduled work (recurring + deadlines + auto carry-forward)
 
     private func applyScheduledForToday() {
@@ -263,10 +284,11 @@ final class AppModel {
         // First application of the day this session (launch after midnight or
         // rollover while open): also carry unfinished tasks forward, silently.
         let isFirstToday = lastAppliedDay != today
-        store.applyRecurringTasks(recurring.tasks, to: Date())
+        store.applyRecurringTasks(recurring.tasks, to: Date(),
+                                  header: AppSettings.shared.effectiveRecurringTaskHeader)
         store.applyDeadlines(deadlines.deadlines, to: Date())
         if isFirstToday, AppSettings.shared.autoCarryForward {
-            _ = store.carryForward()
+            _ = store.carryForward(excludingContentKeys: recurringCarryExclusions)
         }
         ensureTodayExists()
         lastAppliedDay = today
@@ -274,23 +296,30 @@ final class AppModel {
 
     /// Catches midnight rollover while the app is open: reloads the vault and
     /// seeds the new day's note (today's file + recurring tasks + deadlines).
+    /// Timers are added to the *main* run loop explicitly —
+    /// `Timer.scheduledTimer` attaches to whatever run loop first touches
+    /// this class, and an off-main touch would silently never fire them.
     private func startDayTimer() {
-        dayTickTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 60, repeats: true) { [weak self] _ in
             guard let self else { return }
             let today = JournalDate.startOfDay(Date())
             guard today != self.lastAppliedDay else { return }
             self.store?.reload()
             self.applyScheduledForToday()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        dayTickTimer = timer
     }
 
     /// Hourly auto-backup check: runs the git backup when the chosen
     /// interval (daily/weekly) has elapsed. Off unless configured, so the
     /// timer itself is harmless when backup is disabled.
     private func startBackupTimer() {
-        backupTimer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 3600, repeats: true) { [weak self] _ in
             self?.runAutoBackupIfDue()
         }
+        RunLoop.main.add(timer, forMode: .common)
+        backupTimer = timer
         // A due backup also runs shortly after launch, not just on the next
         // hourly tick.
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in

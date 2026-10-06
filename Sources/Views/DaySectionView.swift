@@ -16,6 +16,7 @@ struct DaySectionView: View {
 
     @State private var session = EditorSession()
     @State private var confirmDelete = false
+    @State private var deleteError: String?
     /// Incremented by addTodo; lands the caret after the appended "- TODO ".
     @State private var caretAtEndRequest = 0
     /// External text to push into the live editor (watcher adoption while
@@ -47,6 +48,17 @@ struct DaySectionView: View {
             Divider().opacity(0.5)
         }
         .glassContainer(spacing: 0)
+        .alert(
+            "Delete Failed",
+            isPresented: Binding(
+                get: { deleteError != nil },
+                set: { if !$0 { deleteError = nil } }
+            )
+        ) {
+            Button("OK") { deleteError = nil }
+        } message: {
+            Text(deleteError ?? "")
+        }
         .onDisappear {
             flushSave()
         }
@@ -179,8 +191,15 @@ struct DaySectionView: View {
     }
 
     private func deleteEmptyDay() {
+        var failure: String?
         for file in day.files where file.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            try? FileManager.default.removeItem(at: file.url)
+            if let message = store.removeFile(at: file.url) {
+                failure = failure ?? message
+            }
+        }
+        if let failure {
+            deleteError = failure
+            return
         }
         store.reload()
     }

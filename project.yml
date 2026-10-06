@@ -7,7 +7,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "1.8.0"
+    MARKETING_VERSION: "1.9.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
@@ -39,6 +39,7 @@ targets:
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         NSHumanReadableCopyright: DayStream
+        NSRemindersUsageDescription: DayStream mirrors your open tasks as reminders and keeps completion in sync between your notes and Reminders.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.daystream.app

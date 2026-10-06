@@ -2,13 +2,20 @@ import SwiftUI
 import AppKit
 
 /// A non-scrolling, content-fitting markdown editor with outliner niceties:
-/// - Enter continues the bullet at the same indent (empty bullet exits the list)
+/// - Enter continues the bullet at the same indent (empty bullet exits the
+///   list; non-bullet lines get a plain newline, like any Mac editor)
+/// - Backspace/fn-delete treat hidden `added::`/`completed::` stamp lines as
+///   line attributes, not text: joining erases them instead of merging into
+///   them, so erasing a task never corrupts the note
+/// - Standard macOS typing is on: smart quotes/dashes, text replacement,
+///   autocorrection, and (while editing) spell checking
 /// - Tab / Shift-Tab indent / outdent the current line
 /// - `/todo `, `/doing `, `/later `, `/done ` expand to TODO-style markers
 /// - Escape flushes the pending save (callers decide what "done" means)
 /// - ⌘S auto-formats and saves via `onSaveCommit` (callers normalize text first)
 /// - ⌘K links the selection (URL on the clipboard -> `[text](url)`, else `[[wikilink]]`)
 /// - ⌘⏎ toggles the current line's TODO/DONE marker (sync handled by caller)
+/// - ⇧⏎ inserts a new TODO below the current line (with an `added::` stamp)
 /// - Typing `[[` suggests existing page names; ↑/↓ pick, ⏎/⇥ complete
 /// - Drag & drop images into `assets/`, URLs and files as links
 /// - Live preview: markdown syntax renders and hides on lines away from the
@@ -54,11 +61,15 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.drawsBackground = false
         tv.isRichText = false
         tv.allowsUndo = true
-        tv.isAutomaticDashSubstitutionEnabled = false
-        tv.isAutomaticQuoteSubstitutionEnabled = false
-        tv.isAutomaticTextReplacementEnabled = false
+        // Standard macOS typing, like any text editor on the system: smart
+        // quotes/dashes, text-replacement shortcuts, autocorrection.
+        // Continuous spell checking is toggled on focus (see EditorTextView)
+        // so dormant day editors render clean preview, not stale squiggles.
+        tv.isAutomaticQuoteSubstitutionEnabled = true
+        tv.isAutomaticDashSubstitutionEnabled = true
+        tv.isAutomaticTextReplacementEnabled = true
+        tv.isAutomaticSpellingCorrectionEnabled = true
         tv.isContinuousSpellCheckingEnabled = false
-        tv.textContainerInset = Self.inset(liveMarkdown: AppSettings.shared.liveMarkdownRendering)
         tv.textContainer?.lineFragmentPadding = 4
         // Content-fitting, not scrolling: width tracks the container, height
         // is whatever the text needs (set in the container's layout pass).
@@ -68,9 +79,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         tv.textContainer?.heightTracksTextView = false
         tv.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         tv.string = text
+        tv.updateRenderingMode(for: text)
+        tv.textContainerInset = MarkdownEditorView.inset(liveMarkdown: tv.liveMarkdownEnabled)
         tv.revealAllSyntaxInitially()
         tv.layoutManager?.delegate = tv
-        tv.liveMarkdownEnabled = AppSettings.shared.liveMarkdownRendering
         context.coordinator.appliedLiveMarkdown = tv.liveMarkdownEnabled
         tv.delegate = context.coordinator
         tv.onCommit = onCommit
@@ -143,7 +155,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             tv.highlight()
             nsView.invalidateIntrinsicContentSize()
         }
-        let liveRendering = AppSettings.shared.liveMarkdownRendering
+        let liveRendering = AppSettings.shared.liveMarkdownRendering && !tv.rendersPlain
         if context.coordinator.appliedLiveMarkdown != liveRendering {
             context.coordinator.appliedLiveMarkdown = liveRendering
             tv.liveMarkdownEnabled = liveRendering
@@ -191,7 +203,10 @@ struct MarkdownEditorView: NSViewRepresentable {
                 guard let self, let tv = self.textView, event.window === tv.window else { return event }
                 guard tv.window?.firstResponder === tv,
                       event.keyCode == 49,
-                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty
+                      event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+                      // An input-method session (marked text) owns the space
+                      // key: inserting a raw one corrupts the composition.
+                      !tv.hasMarkedText()
                 else { return event }
                 tv.insertText(" ", replacementRange: tv.selectedRange())
                 return nil
@@ -294,6 +309,15 @@ final class EditorTextView: NSTextView {
     /// Edit recorded in shouldChangeText (UTF-16 range after the edit) and
     /// consumed by the next handleTextChanged for line-local highlighting.
     private var pendingEditRange: NSRange?
+    /// Hidden-syntax candidates need rebuilding after any text change (all
+    /// edit paths — typing, external pushes, programmatic edits — funnel
+    /// through handleTextChanged).
+    private var hiddenCandidatesStale = true
+    /// Per-line hideable syntax ranges (caret-independent), ordered by
+    /// document position. Glyph generation queries this instead of
+    /// re-scanning the document per chunk — that rescan was O(n²) with a
+    /// regex per line and froze layout on large notes.
+    private var hiddenCandidates: [(lineRange: NSRange, ranges: [NSRange])] = []
     /// External replacement deferred while an input method has marked text.
     private var pendingExternalText: String?
     /// Idle-timer that reconciles cross-line effects (fences) after typing.
@@ -309,6 +333,36 @@ final class EditorTextView: NSTextView {
             invalidateAllGlyphs()
             needsDisplay = true
             window?.invalidateCursorRects(for: self)
+        }
+    }
+    /// Giant notes (log pastes, imports) render plain: no glyph hiding, no
+    /// gutter decorations, no per-line regex styling. Those passes cost
+    /// hundreds of milliseconds at this size and froze the stream whenever
+    /// a big note's cell materialized while scrolling. Re-evaluated on
+    /// creation and on whole-text swaps only — flipping mid-typing would
+    /// churn the layout harder than it saves.
+    private(set) var rendersPlain = false
+
+    static let plainRenderingLineThreshold = 1200
+
+    static func isHugeText(_ text: String) -> Bool {
+        var lines = 1
+        var searchStart = text.startIndex
+        while let r = text.range(of: "\n", range: searchStart..<text.endIndex) {
+            lines += 1
+            if lines > plainRenderingLineThreshold { return true }
+            searchStart = r.upperBound
+        }
+        return false
+    }
+
+    /// Applies the plain/live-rendering decision for a whole new text.
+    func updateRenderingMode(for newText: String) {
+        let huge = Self.isHugeText(newText)
+        rendersPlain = huge
+        let wanted = !huge && AppSettings.shared.liveMarkdownRendering
+        if liveMarkdownEnabled != wanted {
+            liveMarkdownEnabled = wanted
         }
     }
     /// Full line(s) the selection touches — their syntax stays visible so
@@ -357,6 +411,7 @@ final class EditorTextView: NSTextView {
     /// a keystroke never triggers SwiftUI work.
     func handleTextChanged() {
         applyPendingExternalText()
+        hiddenCandidatesStale = true
         highlightPendingEdit()
         refreshActiveLineHiding()
         updateSuggestions()
@@ -376,9 +431,17 @@ final class EditorTextView: NSTextView {
         }
         pendingEditRange = nil
         let sel = selectedRange()
+        updateRenderingMode(for: newText)
         revealAllSyntaxInitially()
         string = newText
+        // The string setter posts no textDidChange (verified against
+        // AppKit), so handleTextChanged — and with it the hidden-candidate
+        // staleness flag — never runs here. Without this, glyph generation
+        // kept hide-ranges from the previous text: recycled cells and
+        // stamped toggles rendered with overlapping lines.
+        hiddenCandidatesStale = true
         highlight()
+        invalidateAllGlyphs()
         selectedRange = NSRange(location: min(sel.location, (newText as NSString).length), length: 0)
         scrollRangeToVisible(selectedRange)
         refreshActiveLineHiding()
@@ -390,9 +453,9 @@ final class EditorTextView: NSTextView {
         applyExternalText(pending)
     }
 
-    private var slashMarkers: [String: String] {
-        ["/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE"]
-    }
+    private static let slashMarkers: [String: String] = [
+        "/todo": "TODO", "/doing": "DOING", "/later": "LATER", "/now": "NOW", "/done": "DONE",
+    ]
 
     // MARK: - Keyboard plumbing
 
@@ -405,6 +468,14 @@ final class EditorTextView: NSTextView {
         let isBare = modifiers.isEmpty || modifiers == .function
 
         if event.keyCode == Keyboard.space, isBare {
+            // Only claim space while we're the active first responder — a
+            // materialized (dormant) editor must never swallow the key from
+            // whoever actually has focus (the local monitor below gates the
+            // same way). Input-method compositions keep the event: a raw
+            // insert would break the marked-text session.
+            guard window?.firstResponder === self, !hasMarkedText() else {
+                return super.performKeyEquivalent(with: event)
+            }
             insertText(" ", replacementRange: selectedRange())
             return true
         }
@@ -417,8 +488,12 @@ final class EditorTextView: NSTextView {
             onSaveCommit?()
             return true
         }
-        if event.keyCode == Keyboard.returnKey, modifiers == .command {
+        if isTodoToggleEvent(event) {
             toggleTodoOnCurrentLine()
+            return true
+        }
+        if isTodoInsertEvent(event) {
+            if suggestionsShown { completeSelectedSuggestion() } else { insertTodoBelowCurrentLine() }
             return true
         }
         if event.keyCode == Keyboard.b, modifiers == .command {
@@ -439,6 +514,29 @@ final class EditorTextView: NSTextView {
         static let b: UInt16 = 11
         static let i: UInt16 = 34
         static let returnKey: UInt16 = 36
+        static let keypadEnter: UInt16 = 76
+    }
+
+    /// Return-key events carry a hidden `.function` flag in their modifier
+    /// flags (letter-key events don't — which is why `modifiers == .command`
+    /// worked for ⌘K but never for ⌘⏎), so match by membership, not equality.
+    private func isTodoToggleEvent(_ event: NSEvent) -> Bool {
+        guard event.keyCode == Keyboard.returnKey || event.keyCode == Keyboard.keypadEnter else { return false }
+        let m = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.command)
+            && !m.contains(.shift)
+            && !m.contains(.option)
+            && !m.contains(.control)
+    }
+
+    /// ⇧⏎ (⇧ + return or keypad enter, no other modifiers).
+    private func isTodoInsertEvent(_ event: NSEvent) -> Bool {
+        guard event.keyCode == Keyboard.returnKey || event.keyCode == Keyboard.keypadEnter else { return false }
+        let m = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        return m.contains(.shift)
+            && !m.contains(.command)
+            && !m.contains(.option)
+            && !m.contains(.control)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -450,6 +548,18 @@ final class EditorTextView: NSTextView {
             }
             return
         }
+        // The key-equivalent phase above doesn't reliably win for return-key
+        // events inside the SwiftUI hierarchy (same story as the space key):
+        // the plain return binding claims them as insertNewline:. Intercept
+        // here, before interpretKeyEvents applies the binding.
+        if isTodoToggleEvent(event) {
+            toggleTodoOnCurrentLine()
+            return
+        }
+        if isTodoInsertEvent(event) {
+            if suggestionsShown { completeSelectedSuggestion() } else { insertTodoBelowCurrentLine() }
+            return
+        }
         super.keyDown(with: event)
     }
 
@@ -459,11 +569,23 @@ final class EditorTextView: NSTextView {
         true
     }
 
+    /// Spell check runs only on the focused editor: every day in the stream
+    /// is an editor, and dormant ones render live preview where squiggles
+    /// (and the cost of checking every note) don't belong.
+    override func becomeFirstResponder() -> Bool {
+        let ok = super.becomeFirstResponder()
+        if ok { isContinuousSpellCheckingEnabled = true }
+        return ok
+    }
+
     /// The suggestion panel is non-activating, so it can't dismiss itself
     /// when focus moves elsewhere; close it here instead.
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
-        if ok { closeSuggestions() }
+        if ok {
+            isContinuousSpellCheckingEnabled = false
+            closeSuggestions()
+        }
         return ok
     }
 
@@ -570,11 +692,9 @@ final class EditorTextView: NSTextView {
         for (from, to) in markers where rest.hasPrefix(from) {
             if let r = line.range(of: from) {
                 let nsr = NSRange(r, in: line)
-                shouldChangeText(in: lineRange, replacementString: line)
-                textStorage?.replaceCharacters(
-                    in: NSRange(location: lineRange.location + nsr.location, length: nsr.length),
-                    with: to
-                )
+                let absRange = NSRange(location: lineRange.location + nsr.location, length: nsr.length)
+                shouldChangeText(in: absRange, replacementString: to)
+                textStorage?.replaceCharacters(in: absRange, with: to)
                 didChangeText()
                 if to == "DONE" {
                     stampCompletion(lineStart: lineRange.location)
@@ -588,7 +708,7 @@ final class EditorTextView: NSTextView {
         let bulletOffset = line.count - (line.drop { $0 == "\t" || $0 == " " }).count
         let insertAt = lineRange.location + bulletOffset + 2
         guard line.count - bulletOffset >= 2 else { return }
-        shouldChangeText(in: lineRange, replacementString: line)
+        shouldChangeText(in: NSRange(location: insertAt, length: 0), replacementString: "TODO ")
         textStorage?.replaceCharacters(
             in: NSRange(location: insertAt, length: 0),
             with: "TODO "
@@ -604,7 +724,12 @@ final class EditorTextView: NSTextView {
     /// editor-toggled tasks.
     private func stampCompletion(lineStart: Int) {
         let s = string as NSString
-        let lineIndex = s.substring(to: lineStart).components(separatedBy: "\n").count - 1
+        // Line number without copying/splitting the whole prefix.
+        var lineIndex = 0
+        s.enumerateSubstrings(
+            in: NSRange(location: 0, length: min(lineStart, s.length)),
+            options: [.byLines, .substringNotRequired]
+        ) { _, _, _, _ in lineIndex += 1 }
         let stamped = NoteFormatter.withCompletionStamp(s as String, blockLineIndex: lineIndex, at: Date())
         guard stamped != s as String else { return }
         applyExternalText(stamped)
@@ -714,6 +839,50 @@ final class EditorTextView: NSTextView {
 
     // MARK: - Outliner behaviors
 
+    /// End of the block that starts at `lineRange`: skips the block's
+    /// property lines (`Key:: value`) and (optionally) indented child
+    /// lines, stopping at the next bullet, blank line or unindented text.
+    /// Inserts must land here — between blocks, never between a task and
+    /// its `added::`/`completed::` stamps (a stamp separated from its task
+    /// no longer counts as that task's metadata).
+    private func blockEnd(afterLine lineRange: NSRange, includeIndentedChildren: Bool) -> Int {
+        let s = string as NSString
+        var scan = NSMaxRange(lineRange)
+        while scan < s.length {
+            let next = s.lineRange(for: NSRange(location: scan, length: 0))
+            let line = s.substring(with: next)
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { break }
+            if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") { break }
+            let isProperty = line.range(of: #"^\s*[A-Za-z][A-Za-z0-9_-]*::"#, options: .regularExpression) != nil
+            let isIndented = line.first == "\t" || line.first == " "
+            if !isProperty && !(includeIndentedChildren && isIndented) { break }
+            scan = NSMaxRange(next)
+        }
+        return scan
+    }
+
+    /// ⇧⏎: a fresh TODO directly below the current line's *block*
+    /// (property lines and children stay attached to the task above),
+    /// inheriting the line's indent, caret ready to type. The `added::`
+    /// stamp matches what ⌘N / addTask write, so duration badges work from
+    /// the start; it renders collapsed (a bookkeeping line) while the caret
+    /// is elsewhere.
+    private func insertTodoBelowCurrentLine() {
+        let s = string as NSString
+        let caret = selectedRange().location
+        let lineRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
+        let lineText = s.substring(with: lineRange)
+        let indent = String(lineText.prefix { $0 == "\t" || $0 == " " })
+        let insertion = indent + "- TODO \n"
+            + indent + "\tadded:: " + NoteFormatter.timestamp(Date()) + "\n"
+        let target = blockEnd(afterLine: lineRange, includeIndentedChildren: true)
+        insertText(insertion, replacementRange: NSRange(location: target, length: 0))
+        // Right after "- TODO " — before the stamp line.
+        selectedRange = NSRange(location: target + (indent as NSString).length + 7, length: 0)
+        scrollRangeToVisible(selectedRange)
+    }
+
     override func insertNewline(_ sender: Any?) {
         if suggestionsShown {
             completeSelectedSuggestion()
@@ -721,30 +890,55 @@ final class EditorTextView: NSTextView {
         }
         let s = string as NSString
         let caret = selectedRange().location
-        let lineStart = (s.lineRange(for: NSRange(location: min(caret, s.length), length: 0)).location)
+        let fullRange = s.lineRange(for: NSRange(location: min(caret, s.length), length: 0))
+        let lineStart = fullRange.location
         let lineText = s.substring(with: NSRange(location: lineStart, length: caret - lineStart))
 
         let indentUnits = BlockTree.leadingWhitespaceUnits(lineText)
         let afterIndent = lineText.drop { $0 == "\t" || $0 == " " }
         let isEmptyBullet = afterIndent == "-" || afterIndent == "*"
+        let isBulletLine = afterIndent.hasPrefix("- ") || afterIndent.hasPrefix("* ")
+
+        // Non-bullet lines (prose, headings) get a plain newline, the way
+        // every Mac text editor behaves — bullets only continue bullets.
+        guard isBulletLine || isEmptyBullet else {
+            super.insertNewline(sender)
+            return
+        }
 
         if isEmptyBullet {
-            // Exit the list: clear the empty bullet and insert a plain newline.
+            // Exit the list: clear the empty bullet (and any property lines
+            // that belonged to it, so no orphan `added::` survives) and
+            // insert a plain newline.
             // UTF-16 length: text before the caret can contain astral chars
             // (emoji), where Swift's scalar count diverges from NSString's.
-            let clearRange = NSRange(location: lineStart, length: (lineText as NSString).length)
+            let end = blockEnd(afterLine: fullRange, includeIndentedChildren: false)
+            let clearRange = NSRange(location: lineStart, length: end - lineStart)
             replaceCharacters(in: clearRange, with: "")
             super.insertNewline(sender)
             return
         }
-        // Continue numbered lists too: "- 1. foo" -> next "2.".
+        // A caret at the line's end continues the list *below the whole
+        // block* — inserting at the caret would split the task from its
+        // `added::`/`completed::` property lines (and any indented
+        // children), leaving the stamps attached to the wrong task.
+        // UTF-16 length: text before the caret can contain astral chars
+        // (emoji), where Swift's scalar count diverges from NSString's.
+        let atLineEnd = fullRange.length == 0 || caret == NSMaxRange(fullRange) - 1
+        let content: String
         if let number = trailingListNumber(lineText) {
-            let indent = String(repeating: "\t", count: indentUnits)
-            insertText("\n" + indent + "- \(number + 1). ", replacementRange: selectedRange())
-            return
+            // Continue numbered lists too: "- 1. foo" -> next "2.".
+            content = String(repeating: "\t", count: indentUnits) + "- \(number + 1). "
+        } else {
+            content = String(repeating: "\t", count: indentUnits) + "- "
         }
-        let indent = String(repeating: "\t", count: indentUnits)
-        insertText("\n" + indent + "- ", replacementRange: selectedRange())
+        if atLineEnd {
+            let target = blockEnd(afterLine: fullRange, includeIndentedChildren: true)
+            insertText(content + "\n", replacementRange: NSRange(location: target, length: 0))
+            selectedRange = NSRange(location: target + (content as NSString).length, length: 0)
+        } else {
+            insertText("\n" + content, replacementRange: selectedRange())
+        }
     }
 
     private func trailingListNumber(_ lineText: String) -> Int? {
@@ -794,6 +988,107 @@ final class EditorTextView: NSTextView {
         selectedRange = NSRange(location: max(caret - 1, 0), length: 0)
     }
 
+    // MARK: - Erasing lines around hidden property lines
+
+    /// Contiguous bookkeeping property lines (`added::`, `completed::`, …)
+    /// directly after `lineRange`, as one range including their newlines.
+    /// These lines are invisible while the caret is elsewhere, so plain
+    /// text-editing keys joined onto them invisibly and corrupted notes —
+    /// deletes around them have to consume them deliberately.
+    private func trailingPropertyLines(afterLine lineRange: NSRange) -> NSRange? {
+        let s = string as NSString
+        var start = -1
+        var end = -1
+        var scan = NSMaxRange(lineRange)
+        while scan < s.length {
+            let next = s.lineRange(for: NSRange(location: scan, length: 0))
+            let line = s.substring(with: next)
+            guard LiveMarkdown.isBookkeepingPropertyLine(
+                line.trimmingCharacters(in: .whitespaces)) else { break }
+            if start < 0 { start = next.location }
+            end = NSMaxRange(next)
+            scan = end
+        }
+        guard start >= 0 else { return nil }
+        return NSRange(location: start, length: end - start)
+    }
+
+    private func deleteRange(_ range: NSRange) {
+        shouldChangeText(in: range, replacementString: "")
+        replaceCharacters(in: range, with: "")
+        didChangeText()
+    }
+
+    override func deleteBackward(_ sender: Any?) {
+        let sel = selectedRange()
+        if sel.length == 0, sel.location > 0 {
+            let s = string as NSString
+            let lineRange = s.lineRange(for: NSRange(location: sel.location, length: 0))
+            if sel.location == lineRange.location {
+                let current = s.substring(with: lineRange).trimmingCharacters(in: .whitespaces)
+                // On a stamp line itself: remove the whole (usually
+                // invisible) line — joining it into the block above would
+                // paste the timestamp into the task's text.
+                if LiveMarkdown.isBookkeepingPropertyLine(current) {
+                    deleteRange(lineRange)
+                    return
+                }
+                // Stamps sitting between the caret's line and the previous
+                // visible line: a plain join would merge onto a hidden
+                // property line, which then hides the merged text too.
+                // Join with the previous *visible* line instead.
+                var joinStart = lineRange.location
+                while joinStart > 0 {
+                    let prev = s.lineRange(for: NSRange(location: joinStart - 1, length: 0))
+                    let prevText = s.substring(with: prev).trimmingCharacters(in: .whitespaces)
+                    if LiveMarkdown.isBookkeepingPropertyLine(prevText) {
+                        joinStart = prev.location
+                    } else {
+                        break
+                    }
+                }
+                if joinStart < lineRange.location {
+                    // A bullet joined into the block above takes its own
+                    // stamps with it — they'd be orphans otherwise.
+                    if let stamps = trailingPropertyLines(afterLine: lineRange) {
+                        deleteRange(stamps)
+                    }
+                    deleteRange(NSRange(location: joinStart, length: lineRange.location - joinStart))
+                    return
+                }
+                // Plain join of a bullet line (or of the empty line a bullet
+                // was erased to): same orphan rule applies.
+                if current.isEmpty
+                    || current.hasPrefix("- ") || current.hasPrefix("* ")
+                    || current == "-" || current == "*",
+                    let stamps = trailingPropertyLines(afterLine: lineRange) {
+                    deleteRange(stamps)
+                    super.deleteBackward(sender)
+                    return
+                }
+            }
+        }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        let sel = selectedRange()
+        if sel.length == 0 {
+            let s = string as NSString
+            guard sel.location < s.length else { return super.deleteForward(sender) }
+            let lineRange = s.lineRange(for: NSRange(location: sel.location, length: 0))
+            // At a line end with invisible stamps below: erase those, not
+            // the newline (joining would drag the next visible line through
+            // the stamps into this block's tail).
+            if sel.location == NSMaxRange(lineRange) - 1,
+               let stamps = trailingPropertyLines(afterLine: lineRange) {
+                deleteRange(stamps)
+                return
+            }
+        }
+        super.deleteForward(sender)
+    }
+
     override func insertText(_ string: Any, replacementRange: NSRange) {
         // Slash command expansion: "/todo " -> "TODO "
         if let typed = string as? String, typed.hasSuffix(" ") {
@@ -802,7 +1097,7 @@ final class EditorTextView: NSTextView {
             if caret > 0 {
                 let scanStart = max(0, caret - 16)
                 let window = s.substring(with: NSRange(location: scanStart, length: caret - scanStart))
-                for (slash, marker) in slashMarkers {
+                for (slash, marker) in Self.slashMarkers {
                     if window.hasSuffix(slash) {
                         let replaceLen = slash.count
                         let wordStart = caret - replaceLen
@@ -919,15 +1214,15 @@ final class EditorTextView: NSTextView {
 
     // MARK: - Syntax highlighting
 
-    private var markerColors: [String: NSColor] {
-        [
-            "TODO": .systemOrange,
-            "DOING": NSColor.readableLink,
-            "LATER": .systemPurple,
-            "NOW": .systemRed,
-            "DONE": .systemGreen,
-        ]
-    }
+    // Allocated once — styleLine runs per line per highlight pass and the
+    // dictionary literal per call was pure overhead.
+    private static let markerColors: [String: NSColor] = [
+        "TODO": .systemOrange,
+        "DOING": NSColor.readableLink,
+        "LATER": .systemPurple,
+        "NOW": .systemRed,
+        "DONE": .systemGreen,
+    ]
 
     /// Patterns are line-local (`\n` excluded) and live in LiveMarkdown,
     /// shared with the live-preview hider so styling and hiding always
@@ -945,6 +1240,12 @@ final class EditorTextView: NSTextView {
             .font: baseFont,
             .foregroundColor: NSColor.labelColor,
         ], range: full)
+        // Plain renderers stop here: one base-attribute pass over the
+        // whole text, no per-line regex styling.
+        guard !rendersPlain else {
+            storage.endEditing()
+            return
+        }
 
         let s = storage.string as NSString
         var inFence = false
@@ -964,7 +1265,7 @@ final class EditorTextView: NSTextView {
     private func highlightPendingEdit() {
         guard let storage = textStorage else { return }
         defer { pendingEditRange = nil }
-        guard let edited = pendingEditRange else { return }
+        guard !rendersPlain, let edited = pendingEditRange else { return }
         let s = storage.string as NSString
         guard edited.location <= s.length else { return }
         let clamped = NSRange(location: edited.location,
@@ -980,15 +1281,19 @@ final class EditorTextView: NSTextView {
 
     /// Fence edits change the styling of *following* lines, which the
     /// line-local pass can't know about. A short idle pass over the whole
-    /// document reconciles those (and is cheap: no regex compilation).
+    /// document reconciles those — but only when a fence count actually
+    /// changed: styling is line-local otherwise, so the full pass is pure
+    /// waste after ordinary keystrokes.
     private func scheduleHighlightReconcile() {
+        let fenceCountAtSchedule = fenceLineCount
         highlightReconcileTask?.cancel()
         highlightReconcileTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.highlight()
-                self?.reconcileFenceDrivenHiding()
+                guard let self, self.fenceLineCount != fenceCountAtSchedule else { return }
+                self.highlight()
+                self.reconcileFenceDrivenHiding()
             }
         }
     }
@@ -1077,7 +1382,7 @@ final class EditorTextView: NSTextView {
         // TODO-family markers on bullet lines.
         if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") {
             let afterBullet = trimmed.dropFirst(2)
-            for (marker, color) in markerColors {
+            for (marker, color) in Self.markerColors {
                 if afterBullet.hasPrefix(marker + " ") || afterBullet == marker {
                     // Indent is tabs/spaces only, so scalar and UTF-16 counts
                     // agree here.
@@ -1191,7 +1496,11 @@ final class EditorTextView: NSTextView {
             return
         }
         if decorationsDirty { rebuildDecorations() }
-        checkboxRects = []
+        // Full redraws rebuild the click-target list; partial ones (AppKit
+        // redraw clips) only repaint intersecting decorations and keep the
+        // last full list — rects for unchanged regions stay valid.
+        let fullRedraw = dirtyRect.isEmpty || dirtyRect.contains(bounds)
+        if fullRedraw { checkboxRects = [] }
         let s = string as NSString
         let baseFont = font ?? .systemFont(ofSize: 14)
 
@@ -1203,6 +1512,13 @@ final class EditorTextView: NSTextView {
             guard glyphRange.length > 0 else { continue }
             let fragment = layoutManager.lineFragmentRect(
                 forGlyphAt: glyphRange.location, effectiveRange: nil)
+            if !fullRedraw {
+                // Fragment rects are container-space; shift to view space to
+                // test against the dirty region.
+                let viewFragment = fragment.offsetBy(
+                    dx: textContainerInset.width, dy: textContainerInset.height)
+                guard viewFragment.intersects(dirtyRect) else { continue }
+            }
 
             // Content start x: first glyph after the hidden prefix.
             let line = s.substring(with: deco.lineRange)
@@ -1220,7 +1536,9 @@ final class EditorTextView: NSTextView {
 
             if deco.marker != nil {
                 let box = drawCheckbox(in: fragment, contentX: contentX, done: deco.marker == "DONE")
-                checkboxRects.append((box, deco.lineRange))
+                if fullRedraw {
+                    checkboxRects.append((box, deco.lineRange))
+                }
             } else {
                 drawBulletDash(contentX: contentX, fragment: fragment, baseFont: baseFont)
             }
@@ -1288,7 +1606,7 @@ final class EditorTextView: NSTextView {
     }
 
     private static let durationAttrs: [NSAttributedString.Key: Any] = [
-        .font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium),
+        .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .medium),
         .foregroundColor: NSColor.systemGreen,
     ]
     private static let durationIcon: NSImage? = {
@@ -1303,24 +1621,31 @@ final class EditorTextView: NSTextView {
     private func drawDurationBadge(_ duration: String, fragment: NSRect) {
         let text = duration as NSString
         let textSize = text.size(withAttributes: Self.durationAttrs)
-        let h: CGFloat = 15
-        let iconSize: CGFloat = 9
-        let w = 6 + iconSize + 3 + textSize.width + 6
-        let x = bounds.width - w - 10
-        let y = fragment.midY + textContainerInset.height - h / 2
+        let h: CGFloat = 16
+        let iconSize: CGFloat = 10
+        let pad: CGFloat = 8
+        let gap: CGFloat = 4
+        // Measured widths run tight at these sizes; the fixed slack widens
+        // the capsule well past the text (right-anchored, so it grows
+        // leftward), so every duration length fits.
+        let w = pad + iconSize + gap + ceil(textSize.width) + pad + 24
+        let x = (bounds.width - w - 10).rounded()
+        let y = (fragment.midY + textContainerInset.height - h / 2).rounded()
         let capsule = NSBezierPath(roundedRect: NSRect(x: x, y: y, width: w, height: h),
                                    xRadius: h / 2, yRadius: h / 2)
         NSColor.systemGreen.withAlphaComponent(0.13).setFill()
         capsule.fill()
-        Self.durationIcon?.draw(in: NSRect(x: x + 6, y: y + (h - iconSize) / 2, width: iconSize, height: iconSize))
-        text.draw(at: NSPoint(x: x + 6 + iconSize + 3, y: y + (h - textSize.height) / 2),
+        Self.durationIcon?.draw(in: NSRect(x: x + pad, y: y + (h - iconSize) / 2,
+                                           width: iconSize, height: iconSize))
+        text.draw(at: NSPoint(x: x + pad + iconSize + gap,
+                              y: (y + (h - textSize.height) / 2).rounded()),
                   withAttributes: Self.durationAttrs)
     }
 
     private func rebuildDecorations() {
         decorationsDirty = false
         decorations = []
-        guard let storage = textStorage, storage.length > 0 else { return }
+        guard !rendersPlain, let storage = textStorage, storage.length > 0 else { return }
         let text = storage.string
         let lines = text.components(separatedBy: "\n")
         var starts: [Int] = []
@@ -1383,7 +1708,7 @@ extension EditorTextView {
     /// the top of a note whose editor was created empty (caret 0), and the
     /// pushed text adopts that dead position.
     func refreshActiveLineHiding() {
-        guard let layoutManager, let storage = textStorage else { return }
+        guard liveMarkdownEnabled, let layoutManager, let storage = textStorage else { return }
         guard storage.length > 0 else {
             activeLineCharRange = NSRange(location: 0, length: 0)
             return
@@ -1427,35 +1752,70 @@ extension EditorTextView {
         return count
     }
 
-    /// Hide-set for a glyph-generation chunk: per-line syntax ranges over the
-    /// chunk's lines, skipping fenced code and the active line. Fence state
-    /// needs a doc-start scan — same cost profile as the existing
-    /// fenceOpen(before:) pass; daily notes stay small.
+    /// Hide-set for a glyph-generation chunk: the precomputed candidate
+    /// ranges of the chunk's lines, minus the caret's line. One full pass
+    /// per text version (see `hiddenCandidates`), O(chunk) per query —
+    /// the old per-chunk rescan from the document start was O(n²).
     private func hiddenRanges(forCharacterRange range: NSRange) -> [NSRange] {
         guard let storage = textStorage, storage.length > 0 else { return [] }
+        if hiddenCandidatesStale {
+            rebuildHiddenCandidates()
+        }
         let s = storage.string as NSString
         let loc = min(range.location, s.length)
         let len = min(range.length, s.length - loc)
         guard len > 0 else { return [] }
         let covered = s.lineRange(for: NSRange(location: loc, length: len))
-        var hidden: [NSRange] = []
-        var inFence = false
-        s.enumerateSubstrings(in: NSRange(location: 0, length: NSMaxRange(covered)), options: .byLines) { sub, lineRange, _, _ in
-            let opensFence = sub.map { BlockTree.fenceMarker($0.trimmingCharacters(in: .whitespaces)) != nil } ?? false
-            defer { if opensFence { inFence.toggle() } }
-            guard !inFence else { return }
-            guard NSIntersectionRange(lineRange, covered).length > 0 else { return }
-            guard NSIntersectionRange(lineRange, self.activeLineCharRange).length == 0 else { return }
-            guard let sub, !sub.isEmpty else { return }
-            // Bookkeeping properties (added::/completed::/id::) vanish
-            // entirely — the rendered view never showed them either.
-            if LiveMarkdown.isBookkeepingPropertyLine(sub) {
-                hidden.append(lineRange)
-                return
+
+        // Candidates are ordered by line: binary-search to the first line
+        // that can reach into `covered`, then walk until past its end.
+        var lo = 0
+        var hi = hiddenCandidates.count
+        while lo < hi {
+            let mid = (lo + hi) / 2
+            if NSMaxRange(hiddenCandidates[mid].lineRange) <= covered.location {
+                lo = mid + 1
+            } else {
+                hi = mid
             }
-            hidden.append(contentsOf: LiveMarkdown.hiddenRanges(line: sub, offset: lineRange.location))
+        }
+        var hidden: [NSRange] = []
+        var i = lo
+        while i < hiddenCandidates.count,
+              hiddenCandidates[i].lineRange.location < NSMaxRange(covered) {
+            let entry = hiddenCandidates[i]
+            if NSIntersectionRange(entry.lineRange, activeLineCharRange).length == 0 {
+                hidden.append(contentsOf: entry.ranges)
+            }
+            i += 1
         }
         return hidden
+    }
+
+    /// One pass over the document: for every line (outside fences), the
+    /// syntax ranges that hide when the caret isn't on it. Bookkeeping
+    /// property lines hide entirely.
+    private func rebuildHiddenCandidates() {
+        hiddenCandidatesStale = false
+        hiddenCandidates = []
+        guard let storage = textStorage, storage.length > 0 else { return }
+        let s = storage.string as NSString
+        var inFence = false
+        s.enumerateSubstrings(
+            in: NSRange(location: 0, length: s.length), options: .byLines
+        ) { substring, lineRange, _, _ in
+            let opensFence = substring.map {
+                BlockTree.fenceMarker($0.trimmingCharacters(in: .whitespaces)) != nil
+            } ?? false
+            defer { if opensFence { inFence.toggle() } }
+            guard !inFence, let substring, !substring.isEmpty else { return }
+            if LiveMarkdown.isBookkeepingPropertyLine(substring) {
+                self.hiddenCandidates.append((lineRange, [lineRange]))
+            } else {
+                self.hiddenCandidates.append(
+                    (lineRange, LiveMarkdown.hiddenRanges(line: substring, offset: lineRange.location)))
+            }
+        }
     }
 }
 

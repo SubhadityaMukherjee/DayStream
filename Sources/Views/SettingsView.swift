@@ -28,6 +28,9 @@ struct SettingsView: View {
             RecurringTab()
                 .tabItem { Label("Recurring", systemImage: "repeat") }
                 .tag(AppModel.SettingsTab.recurring.rawValue)
+            RemindersTab()
+                .tabItem { Label("Reminders", systemImage: "checklist") }
+                .tag(AppModel.SettingsTab.reminders.rawValue)
             ShortcutsTab()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(AppModel.SettingsTab.shortcuts.rawValue)
@@ -242,17 +245,21 @@ private struct FontTab: View {
     }
 }
 
-/// Manage recurring tasks: daily, weekly on a weekday, or once on a date.
-/// Due tasks are seeded at the top of the day's note (duplicate-checked).
+/// Manage recurring tasks: daily, weekly, biweekly on a weekday, or once on
+/// a date. Due tasks are seeded under the configured section header in the
+/// day's note (duplicate-checked).
 private struct RecurringTab: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
 
     @State private var title = ""
-    @State private var mode = 0 // 0 daily, 1 weekly, 2 once
+    @State private var mode = 0 // 0 daily, 1 weekly, 2 once, 3 biweekly
     @State private var weekday = 2
     @State private var onceDate = JournalDate.startOfDay(Date())
+    @State private var taskHeader = ""
 
     var body: some View {
+        @Bindable var settings = settings
         Form {
             Section("Existing") {
                 if appModel.recurring.tasks.isEmpty {
@@ -265,7 +272,8 @@ private struct RecurringTab: View {
                             VStack(alignment: .leading, spacing: 1) {
                                 Text(task.title)
                                     .lineLimit(1)
-                                Text(task.scheduleDescription())
+                                Text(task.scheduleDescription()
+                                     + (task.header.map { " · [[\($0)]]" } ?? ""))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
@@ -291,11 +299,15 @@ private struct RecurringTab: View {
                 Picker("Repeats", selection: $mode) {
                     Text("Daily").tag(0)
                     Text("Weekly").tag(1)
+                    Text("Bi-Weekly").tag(3)
                     Text("Once").tag(2)
                 }
                 .pickerStyle(.segmented)
 
-                if mode == 1 {
+                TextField("Header (default: \(settings.effectiveRecurringTaskHeader))",
+                          text: $taskHeader)
+
+                if mode == 1 || mode == 3 {
                     Picker("On", selection: $weekday) {
                         ForEach(1...7, id: \.self) { day in
                             Text(Calendar.current.weekdaySymbols[day - 1]).tag(day)
@@ -309,28 +321,144 @@ private struct RecurringTab: View {
 
                 Button("Add Recurring Task", action: add)
                     .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
 
-                Text("Due tasks appear as a TODO at the top of that day's note, and are never duplicated.")
+            Section("Task Header") {
+                TextField("Header (default ADMIN)", text: $settings.recurringTaskHeader)
+                Text("Due tasks are grouped under a - [[header]] section in each day's note (ADMIN by default). The header is reused when it already exists — never duplicated.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 460, height: 440)
+        .frame(width: 460, height: 500)
     }
 
     private func add() {
         let trimmed = title.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        let trimmedHeader = taskHeader.trimmingCharacters(in: .whitespacesAndNewlines)
         let schedule: RecurringTask.Schedule
         switch mode {
         case 1: schedule = .weekly(weekday: weekday)
         case 2: schedule = .once(date: onceDate)
+        case 3: schedule = .biweekly(weekday: weekday)
         default: schedule = .daily
         }
-        appModel.recurring.add(RecurringTask(title: trimmed, schedule: schedule))
+        let task = RecurringTask(title: trimmed, schedule: schedule,
+                                 header: trimmedHeader.isEmpty ? nil : trimmedHeader)
+        appModel.recurring.add(task)
+        // Every new task lands in today's note right away — even when its
+        // schedule isn't due today (weekly on another weekday, say) — and
+        // recurrence calculates from this point on.
+        let effectiveHeader = trimmedHeader.isEmpty
+            ? AppSettings.shared.effectiveRecurringTaskHeader
+            : trimmedHeader
+        _ = appModel.store?.addRecurringTask(task.title, to: Date(), header: effectiveHeader)
         title = ""
+        taskHeader = ""
     }
+}
+
+/// Apple Reminders mirror: enable toggle (requests access), target list
+/// picker, manual sync and status. The mirror itself lives in
+/// RemindersSyncEngine; this only drives it.
+private struct RemindersTab: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
+    @State private var requestingAccess = false
+
+    private var engine: RemindersSyncEngine { appModel.remindersSync }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Apple Reminders") {
+                Toggle("Sync open tasks with Reminders", isOn: $settings.remindersSyncEnabled)
+                    .disabled(requestingAccess)
+                    .onChange(of: settings.remindersSyncEnabled) { _, on in
+                        guard !requestingAccess else { return }
+                        if on {
+                            requestingAccess = true
+                            Task {
+                                await engine.enable()
+                                requestingAccess = false
+                                if !engine.accessGranted {
+                                    settings.remindersSyncEnabled = false
+                                }
+                            }
+                        } else {
+                            engine.disable()
+                        }
+                    }
+                Text("Open tasks from the last three months are mirrored as reminders, titled SECTION/task under a section header (e.g. ADMIN/task). Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note — name one HEADER/task and it files under that section, which is created if missing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if requestingAccess {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for Reminders access…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if settings.remindersSyncEnabled && engine.accessDenied {
+                    Label("DayStream isn't allowed to use Reminders. Grant access in System Settings, then turn sync back on.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!)
+                    }
+                }
+
+                if settings.remindersSyncEnabled && engine.accessGranted {
+                    Picker("List", selection: $settings.remindersListID) {
+                        ForEach(engine.listOptions, id: \.id) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                    .onChange(of: settings.remindersListID) { _, _ in
+                        engine.reconcileNow()
+                    }
+                    HStack {
+                        Button("Sync Now") { engine.reconcileNow() }
+                            .disabled(engine.isRunning)
+                        Spacer()
+                        Text(statusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = engine.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Text("• Only the selected list is touched — a DayStream list is created the first time you sync.\n• Closing a task (checking it or deleting its text) completes its reminder; unchecking that reminder reopens the task.\n• Deleting a reminder in Reminders stops mirroring that task until it closes and reopens later.\n• Sync runs a few seconds after a change on either side, and at least every 30 seconds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460, height: 460)
+        .onAppear { engine.refreshListOptions() }
+    }
+
+    private var statusText: String {
+        guard let last = engine.lastSync else { return "Not synced yet" }
+        let summary = engine.lastSummary ?? "Up to date"
+        return "\(summary) · \(Self.relativeFormatter.string(for: last) ?? "")"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
 }
 
 /// Keyboard shortcut reference (fixed, not configurable) plus the one
@@ -381,6 +509,14 @@ private struct ShortcutsTab: View {
                 Text("From any app: opens DayStream and starts a new todo in today's note with the caret ready. Shortcuts must include ⌘, ⌥ or ⌃.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // Registration conflicts (another app owns the combo) used to
+                // be silently dropped, leaving a shortcut that never fires.
+                if settings.globalQuickAddEnabled, settings.quickAddHotkey != nil,
+                   !GlobalHotkeyManager.shared.isRegistered {
+                    Label("This shortcut couldn't be registered — another app may be using it. Try a different combination.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Section("In DayStream") {
@@ -394,6 +530,7 @@ private struct ShortcutsTab: View {
                 shortcutRow("⌘S", "Save and auto-format (stay in the note)")
                 shortcutRow("⎋", "Flush the pending save (closes a page)")
                 shortcutRow("⌘⏎ or the checkbox", "Toggle TODO / DONE on a task (syncs across notes)")
+                shortcutRow("⇧⏎", "New TODO below the current line")
                 shortcutRow("⌘K", "Link selection (clipboard URL → link, else [[wikilink]])")
                 shortcutRow("⌘B / ⌘I", "Bold / italic")
                 shortcutRow("⇥ / ⇧⇥", "Indent / outdent (or accept [[ autocomplete)")
