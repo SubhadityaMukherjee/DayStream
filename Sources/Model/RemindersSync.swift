@@ -11,10 +11,20 @@ struct ReminderSnapshot: Equatable {
 }
 
 struct VaultTaskSnapshot: Equatable {
-    /// Normalized task text — the join key between vault and Reminders.
+    /// Normalized full title (header included) — the join key between
+    /// vault and Reminders.
     var key: String
-    /// Raw task text, newest occurrence wins — the reminder title.
+    /// Reminder title: `HEADER/task` when the task sits under a section,
+    /// else the bare task text.
     var title: String
+    /// Bare task text — what `VaultStore.syncTodoState` matches by.
+    var content: String
+
+    init(key: String, title: String, content: String? = nil) {
+        self.key = key
+        self.title = title
+        self.content = content ?? title
+    }
 }
 
 /// Title-keyed mirror memory. Reminder ids churn across relaunches and
@@ -67,25 +77,116 @@ enum RemindersSync {
     /// Distinct open tasks (TODO/DOING/LATER/NOW) over `days` (newest
     /// first, only days >= cutoff): the same dedupe rule as the app's
     /// open-task counters — a carried-forward title counts once, newest
-    /// occurrence supplying the display title.
+    /// occurrence supplying the display title. Tasks carry a section
+    /// prefix in the title (`HEADER/task`) from their nearest non-task
+    /// ancestor (indented `- [[ADMIN]]` sections, plain parents), else
+    /// from the heading line governing their position (`## [[OPS]]`,
+    /// bare `[[OPS]]` lines) — so same-titled tasks in different
+    /// sections mirror as distinct reminders.
     static func openTasks(days: [JournalDay], cutoff: Date) -> [VaultTaskSnapshot] {
         var seen = Set<String>()
         var out: [VaultTaskSnapshot] = []
-        func walk(_ nodes: [Block]) {
-            for node in nodes {
-                if node.todoState == .open {
-                    let key = BlockTree.normalize(node.content)
-                    if !key.isEmpty, seen.insert(key).inserted {
-                        out.append(VaultTaskSnapshot(key: key, title: node.content))
+        for day in days where day.date >= cutoff {
+            for file in day.files {
+                let headers = runningHeaders(in: file.text)
+                func walk(_ nodes: [Block], section: String?) {
+                    for node in nodes {
+                        if node.todoState == .open {
+                            let lineHeader = headers.indices.contains(node.lineIndex)
+                                ? headers[node.lineIndex] : nil
+                            let effective = section ?? lineHeader
+                            let title = effective.map { "\($0)/\(node.content)" } ?? node.content
+                            let key = BlockTree.normalize(title)
+                            if !key.isEmpty, seen.insert(key).inserted {
+                                out.append(VaultTaskSnapshot(key: key, title: title, content: node.content))
+                            }
+                        }
+                        // A task's children keep the outer section; only
+                        // non-task blocks (section bullets, plain parents)
+                        // start their own. Heading context needs no
+                        // propagation — each line reads its own.
+                        let childSection = node.todoState == .none
+                            ? (sectionName(of: node) ?? section)
+                            : section
+                        walk(node.children, section: childSection)
                     }
                 }
-                walk(node.children)
+                walk(file.blocks, section: nil)
             }
         }
-        for day in days where day.date >= cutoff {
-            day.files.forEach { walk($0.blocks) }
+        return out
+    }
+
+    /// Running heading context per line. The block parser swallows a
+    /// heading that follows a bullet as that bullet's continuation line,
+    /// so `## X` boundaries are invisible to a block-only walk — they
+    /// must come from a line-level scan. Only zero-indent heading lines
+    /// (`## X`) and bare `[[wikilink]]` lines count: bullet-form headers
+    /// (`- [[ADMIN]]`) own only their indented children, per the app's
+    /// own header conventions.
+    static func runningHeaders(in text: String) -> [String?] {
+        let lines = text.components(separatedBy: "\n")
+        var out = [String?](repeating: nil, count: lines.count)
+        var current: String?
+        var fenced = false
+        for (i, line) in lines.enumerated() {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if BlockTree.fenceMarker(trimmed) != nil {
+                fenced.toggle()
+                out[i] = current
+                continue
+            }
+            if !fenced {
+                let topLevel = !line.hasPrefix(" ") && !line.hasPrefix("\t")
+                if topLevel, let name = headerLineName(trimmed) {
+                    current = name
+                }
+            }
+            out[i] = current
         }
         return out
+    }
+
+    /// Header name for a zero-indent line: a standalone `[[wikilink]]`
+    /// (bare or after heading marks) yields the link target; otherwise
+    /// only `#`-prefixed lines count, as their text. Nil for plain text.
+    static func headerLineName(_ trimmed: String) -> String? {
+        let isHeading = trimmed.hasPrefix("#")
+        let body: String
+        if isHeading {
+            guard let r = trimmed.range(of: "^#{1,6}\\s+", options: .regularExpression) else {
+                return nil
+            }
+            body = String(trimmed[r.upperBound...])
+        } else {
+            body = trimmed
+        }
+        guard !body.isEmpty else { return nil }
+        if body.range(of: "^\\[\\[[^\\[\\]]+\\]\\]$", options: .regularExpression) != nil {
+            return WikiName.wikilinkTargets(in: body).first
+        }
+        return isHeading ? body : nil
+    }
+
+    /// Display name of a non-task block used as a section: its first
+    /// wikilink target (`- [[ADMIN]]` → ADMIN), else the content with
+    /// heading marks stripped.
+    static func sectionName(of block: Block) -> String? {
+        if let link = WikiName.wikilinkTargets(in: block.content).first { return link }
+        let stripped = block.content
+            .replacingOccurrences(of: "^#{1,6}\\s*", with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+        return stripped.isEmpty ? nil : stripped
+    }
+
+    /// Splits a `HEADER/task` reminder title at the first slash. Both
+    /// sides non-empty; callers decide whether the header is real.
+    static func splitHeader(_ title: String) -> (header: String, task: String)? {
+        guard let slash = title.firstIndex(of: "/") else { return nil }
+        let header = String(title[..<slash]).trimmingCharacters(in: .whitespaces)
+        let task = String(title[title.index(after: slash)...]).trimmingCharacters(in: .whitespaces)
+        guard !header.isEmpty, !task.isEmpty else { return nil }
+        return (header, task)
     }
 
     /// One mirror pass: pure transition from (vault tasks, list snapshots,
@@ -129,8 +230,9 @@ enum RemindersSync {
                     next.closedKeys.remove(k)
                 } else {
                     // Completed on the Reminders side while the vault says
-                    // open — the user checked it there.
-                    plan.vaultDoneTitles.append(task.title)
+                    // open — the user checked it there. Vault writes match
+                    // by bare task text (syncTodoState), not the title.
+                    plan.vaultDoneTitles.append(task.content)
                     next.closedKeys.insert(k)
                     next.mirroredKeys.insert(k)
                 }
@@ -148,8 +250,9 @@ enum RemindersSync {
             let k = BlockTree.normalize(r.title)
             guard !k.isEmpty, !openKeys.contains(k) else { continue }
             if next.closedKeys.contains(k) {
-                // Unchecked in Reminders after the mirror completed it.
-                plan.vaultReopenTitles.append(r.title)
+                // Unchecked in Reminders after the mirror completed it;
+                // strip the header so the vault write matches bare tasks.
+                plan.vaultReopenTitles.append(splitHeader(r.title)?.task ?? r.title)
                 next.closedKeys.remove(k)
             } else if next.knownKeys.contains(k) {
                 // Was an open vault task earlier; now closed (done or
@@ -472,10 +575,24 @@ final class RemindersSyncEngine {
                     store.syncTodoState(taskContent: title, to: .open, excluding: nil)
                 }
                 for title in imports {
-                    _ = store.addTask(title, to: Date(), atTop: false)
+                    Self.importIntoVault(title: title, store: store)
                 }
             }
         }
+    }
+
+    /// A `HEADER/task` reminder becomes a task under that section in
+    /// today's note — but only when the header already exists there, so
+    /// titles that merely contain a slash ("2026/2027 plan") import whole.
+    private static func importIntoVault(title: String, store: VaultStore) {
+        if let split = RemindersSync.splitHeader(title) {
+            let (_, todayText) = store.ensureTodayFile()
+            if VaultStore.recurringHeaderLineIndex(header: split.header, in: todayText) != nil {
+                _ = store.addRecurringTask(split.task, to: Date(), header: split.header)
+                return
+            }
+        }
+        _ = store.addTask(title, to: Date(), atTop: false)
     }
 
     private func saveState() {

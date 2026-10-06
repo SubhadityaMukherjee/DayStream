@@ -37,7 +37,67 @@ final class RemindersSyncTests: XCTestCase {
     func testOpenTasksWalksNestedBlocks() {
         let days = [day("2026-10-06", text: "- [[ADMIN]]\n\t- TODO Recurring thing\n")]
         let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
-        XCTAssertEqual(tasks.map(\.key), [key("recurring thing")])
+        XCTAssertEqual(tasks.map(\.title), ["ADMIN/Recurring thing"])
+        XCTAssertEqual(tasks.map(\.content), ["Recurring thing"])
+    }
+
+    func testOpenTasksCarriesSectionFromHeadingAndPlainParents() {
+        let days = [day("2026-10-06", text: """
+        ## [[OPS]]
+        - TODO Deploy
+        - Project Phoenix
+        \t- TODO Ship it
+        - TODO Under ops until the next heading
+        ## Journal
+        - TODO Write entry
+        """)]
+        let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
+        XCTAssertEqual(tasks.map(\.title), [
+            "OPS/Deploy",
+            "Project Phoenix/Ship it",
+            "OPS/Under ops until the next heading",
+            "Journal/Write entry",
+        ])
+    }
+
+    func testBareWikilinkLineActsAsHeader() {
+        let days = [day("2026-10-06", text: "[[ADMIN]]\n- TODO Standup\n")]
+        let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
+        XCTAssertEqual(tasks.map(\.title), ["ADMIN/Standup"])
+    }
+
+    func testHeadingLinesInsideCodeFencesAreIgnored() {
+        let days = [day("2026-10-06", text: """
+        ```
+        ## Fake section
+        [[Also fake]]
+        ```
+        - TODO Real task
+        """)]
+        let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
+        XCTAssertEqual(tasks.map(\.title), ["Real task"])
+    }
+
+    func testTaskParentDoesNotBecomeSection() {
+        let days = [day("2026-10-06", text: "- TODO big thing\n\t- TODO sub-task\n")]
+        let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
+        XCTAssertEqual(tasks.map(\.title), ["big thing", "sub-task"])
+    }
+
+    func testSameTextUnderDifferentSectionsMirrorsDistinctly() {
+        let days = [day("2026-10-06", text: "- [[ADMIN]]\n\t- TODO review\n- [[OPS]]\n\t- TODO review\n")]
+        let tasks = RemindersSync.openTasks(days: days, cutoff: cutoff)
+        XCTAssertEqual(tasks.count, 2)
+        XCTAssertEqual(tasks.map(\.title).sorted(), ["ADMIN/review", "OPS/review"])
+    }
+
+    func testSplitHeader() {
+        XCTAssertEqual(RemindersSync.splitHeader("ADMIN/task")?.header, "ADMIN")
+        XCTAssertEqual(RemindersSync.splitHeader("ADMIN/task")?.task, "task")
+        XCTAssertEqual(RemindersSync.splitHeader("Work stuff/deep clean")?.header, "Work stuff")
+        XCTAssertNil(RemindersSync.splitHeader("no slash"))
+        XCTAssertNil(RemindersSync.splitHeader("/task"))
+        XCTAssertNil(RemindersSync.splitHeader("ADMIN/"))
     }
 
     // MARK: - plan: push
@@ -196,5 +256,32 @@ final class RemindersSyncTests: XCTestCase {
 
         plan = RemindersSync.plan(vaultOpen: vaultOpen, reminders: reminders, state: state)
         XCTAssertEqual(plan.summary, "Up to date")
+    }
+
+    func testSectionedRoundTripMatchesAndWritesBareContent() {
+        let k = key("ADMIN/buy milk")
+        let vaultOpen = [VaultTaskSnapshot(key: k, title: "ADMIN/Buy milk", content: "Buy milk")]
+        var reminders: [ReminderSnapshot] = []
+        var state = RemindersSyncState()
+
+        var plan = RemindersSync.plan(vaultOpen: vaultOpen, reminders: reminders, state: state)
+        XCTAssertEqual(plan.createTitles, ["ADMIN/Buy milk"])
+        state = plan.nextState
+        reminders.append(ReminderSnapshot(id: "r1", title: "ADMIN/Buy milk", isCompleted: false))
+
+        // Match is by the prefixed title…
+        plan = RemindersSync.plan(vaultOpen: vaultOpen, reminders: reminders, state: state)
+        XCTAssertEqual(plan.summary, "Up to date")
+        state = plan.nextState
+
+        // …but vault writes use the bare task text.
+        reminders[0].isCompleted = true
+        plan = RemindersSync.plan(vaultOpen: vaultOpen, reminders: reminders, state: state)
+        XCTAssertEqual(plan.vaultDoneTitles, ["Buy milk"])
+        state = plan.nextState
+
+        reminders[0].isCompleted = false
+        plan = RemindersSync.plan(vaultOpen: [], reminders: reminders, state: state)
+        XCTAssertEqual(plan.vaultReopenTitles, ["Buy milk"])
     }
 }

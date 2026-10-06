@@ -391,7 +391,7 @@ private struct RemindersTab: View {
                             engine.disable()
                         }
                     }
-                Text("Open tasks from the last three months are mirrored as reminders. Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note.")
+                Text("Open tasks from the last three months are mirrored as reminders, titled SECTION/task under a section header (e.g. ADMIN/task). Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note — name one HEADER/task to file it under that section.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -438,7 +438,7 @@ private struct RemindersTab: View {
             }
 
             Section {
-                Text("• Only the selected list is touched — a DayStream list is created the first time you sync.\n• Closing a task (checking it or deleting its text) completes its reminder; unchecking that reminder reopens the task.\n• Deleting a reminder in Reminders stops mirroring that task until it closes and reopens later.")
+                Text("• Only the selected list is touched — a DayStream list is created the first time you sync.\n• Closing a task (checking it or deleting its text) completes its reminder; unchecking that reminder reopens the task.\n• Deleting a reminder in Reminders stops mirroring that task until it closes and reopens later.\n• Sync runs a few seconds after a change on either side, and at least every 30 seconds.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
