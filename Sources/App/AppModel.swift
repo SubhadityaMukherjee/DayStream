@@ -20,6 +20,7 @@ final class AppModel {
 
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
+    let remindersSync = RemindersSyncEngine()
 
     /// Normalized titles of all recurring tasks — never carried forward
     /// (their recurrence seeds them on the days they're due), or an open
@@ -29,7 +30,7 @@ final class AppModel {
     }
 
     enum SettingsTab: Int {
-        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4
+        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4, reminders = 5
     }
 
     /// Set alongside `openSettings()` to land on a specific tab; SettingsView
@@ -130,12 +131,19 @@ final class AppModel {
             AppSettings.shared.gitBackupPath = repo.path
         }
         refreshGitBackupAvailability()
+        // Reminders mirror: hooks every vault mutation; only talks to
+        // EventKit when the user turned it on (access prompt is opt-in).
+        remindersSync.attach(store: store)
+        if AppSettings.shared.remindersSyncEnabled {
+            Task { await remindersSync.enable() }
+        }
         ensureTodayExists()
         applyScheduledForToday()
     }
 
     func disconnectVault() {
         UserDefaults.standard.removeObject(forKey: Self.vaultPathKey)
+        remindersSync.detach()
         store = nil
         canGitBackupFromSidebar = false
     }

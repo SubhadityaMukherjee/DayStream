@@ -28,6 +28,8 @@
 	<false/>
 	<key>NSHumanReadableCopyright</key>
 	<string>DayStream</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>DayStream mirrors your open tasks as reminders and keeps completion in sync between your notes and Reminders.</string>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
 	<key>NSSupportsSuddenTermination</key>

@@ -39,6 +39,7 @@ targets:
         NSSupportsAutomaticTermination: false
         NSSupportsSuddenTermination: false
         NSHumanReadableCopyright: DayStream
+        NSRemindersUsageDescription: DayStream mirrors your open tasks as reminders and keeps completion in sync between your notes and Reminders.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.daystream.app
