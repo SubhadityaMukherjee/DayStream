@@ -21,6 +21,7 @@ final class AppModel {
     let recurring = RecurringTaskStore()
     let deadlines = DeadlineStore()
     let remindersSync = RemindersSyncEngine()
+    let calendarSync = CalendarSyncEngine()
 
     /// Normalized titles of all recurring tasks — never carried forward
     /// (their recurrence seeds them on the days they're due), or an open
@@ -30,7 +31,7 @@ final class AppModel {
     }
 
     enum SettingsTab: Int {
-        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4, reminders = 5
+        case general = 0, fonts = 1, recurring = 2, shortcuts = 3, advanced = 4, reminders = 5, calendar = 6
     }
 
     /// Set alongside `openSettings()` to land on a specific tab; SettingsView
@@ -137,6 +138,11 @@ final class AppModel {
         if AppSettings.shared.remindersSyncEnabled {
             Task { await remindersSync.enable() }
         }
+        // Calendar today-section: same opt-in pattern.
+        calendarSync.attach(store: store)
+        if AppSettings.shared.calendarTodayEnabled {
+            Task { await calendarSync.enable() }
+        }
         ensureTodayExists()
         applyScheduledForToday()
     }
@@ -144,6 +150,7 @@ final class AppModel {
     func disconnectVault() {
         UserDefaults.standard.removeObject(forKey: Self.vaultPathKey)
         remindersSync.detach()
+        calendarSync.detach()
         store = nil
         canGitBackupFromSidebar = false
     }
@@ -287,6 +294,9 @@ final class AppModel {
         store.applyRecurringTasks(recurring.tasks, to: Date(),
                                   header: AppSettings.shared.effectiveRecurringTaskHeader)
         store.applyDeadlines(deadlines.deadlines, to: Date())
+        // Calendar events refresh with the day (launch, midnight rollover)
+        // and stay current via EK change notifications.
+        calendarSync.refresh()
         if isFirstToday, AppSettings.shared.autoCarryForward {
             _ = store.carryForward(excludingContentKeys: recurringCarryExclusions)
         }

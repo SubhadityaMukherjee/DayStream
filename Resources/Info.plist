@@ -26,6 +26,10 @@
 	<string>15.0</string>
 	<key>LSUIElement</key>
 	<false/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>DayStream lists today's calendar events under a TODAY section in today's note. It never modifies your calendars.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>DayStream lists today's calendar events under a TODAY section in today's note.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>DayStream</string>
 	<key>NSRemindersUsageDescription</key>
