@@ -434,7 +434,14 @@ final class EditorTextView: NSTextView {
         updateRenderingMode(for: newText)
         revealAllSyntaxInitially()
         string = newText
+        // The string setter posts no textDidChange (verified against
+        // AppKit), so handleTextChanged — and with it the hidden-candidate
+        // staleness flag — never runs here. Without this, glyph generation
+        // kept hide-ranges from the previous text: recycled cells and
+        // stamped toggles rendered with overlapping lines.
+        hiddenCandidatesStale = true
         highlight()
+        invalidateAllGlyphs()
         selectedRange = NSRange(location: min(sel.location, (newText as NSString).length), length: 0)
         scrollRangeToVisible(selectedRange)
         refreshActiveLineHiding()
@@ -1497,41 +1504,8 @@ final class EditorTextView: NSTextView {
         let s = string as NSString
         let baseFont = font ?? .systemFont(ofSize: 14)
 
-        // Partial draws visit only the decorations whose lines fall in the
-        // dirty region — scrolling large notes redraws narrow strips
-        // constantly, and walking every decoration's fragment each time
-        // showed up as frame drops.
-        var startIndex = 0
-        var maxCharIndex = s.length
-        if !fullRedraw {
-            let containerRect = NSRect(
-                x: dirtyRect.minX - textContainerInset.width,
-                y: dirtyRect.minY - textContainerInset.height,
-                width: dirtyRect.width,
-                height: dirtyRect.height
-            ).intersection(NSRect(origin: .zero, size: container.size))
-            guard containerRect.width > 0, containerRect.height > 0 else { return }
-            let dirtyGlyphs = layoutManager.glyphRange(forBoundingRect: containerRect, in: container)
-            guard dirtyGlyphs.length > 0 else { return }
-            let dirtyChars = layoutManager.characterRange(
-                forGlyphRange: dirtyGlyphs, actualGlyphRange: nil)
-            maxCharIndex = NSMaxRange(dirtyChars)
-            var lo = 0
-            var hi = decorations.count
-            while lo < hi {
-                let mid = (lo + hi) / 2
-                if NSMaxRange(decorations[mid].lineRange) <= dirtyChars.location {
-                    lo = mid + 1
-                } else {
-                    hi = mid
-                }
-            }
-            startIndex = lo
-        }
-
-        for deco in decorations[startIndex...] {
+        for deco in decorations {
             guard deco.lineRange.length > 0,
-                  deco.lineRange.location < maxCharIndex,
                   NSIntersectionRange(deco.lineRange, activeLineCharRange).length == 0
             else { continue }
             let glyphRange = layoutManager.glyphRange(forCharacterRange: deco.lineRange, actualCharacterRange: nil)

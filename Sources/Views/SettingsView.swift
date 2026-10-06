@@ -28,6 +28,9 @@ struct SettingsView: View {
             RecurringTab()
                 .tabItem { Label("Recurring", systemImage: "repeat") }
                 .tag(AppModel.SettingsTab.recurring.rawValue)
+            RemindersTab()
+                .tabItem { Label("Reminders", systemImage: "checklist") }
+                .tag(AppModel.SettingsTab.reminders.rawValue)
             ShortcutsTab()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(AppModel.SettingsTab.shortcuts.rawValue)
@@ -355,6 +358,107 @@ private struct RecurringTab: View {
         title = ""
         taskHeader = ""
     }
+}
+
+/// Apple Reminders mirror: enable toggle (requests access), target list
+/// picker, manual sync and status. The mirror itself lives in
+/// RemindersSyncEngine; this only drives it.
+private struct RemindersTab: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
+    @State private var requestingAccess = false
+
+    private var engine: RemindersSyncEngine { appModel.remindersSync }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Apple Reminders") {
+                Toggle("Sync open tasks with Reminders", isOn: $settings.remindersSyncEnabled)
+                    .disabled(requestingAccess)
+                    .onChange(of: settings.remindersSyncEnabled) { _, on in
+                        guard !requestingAccess else { return }
+                        if on {
+                            requestingAccess = true
+                            Task {
+                                await engine.enable()
+                                requestingAccess = false
+                                if !engine.accessGranted {
+                                    settings.remindersSyncEnabled = false
+                                }
+                            }
+                        } else {
+                            engine.disable()
+                        }
+                    }
+                Text("Open tasks from the last three months are mirrored as reminders, titled SECTION/task under a section header (e.g. ADMIN/task). Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note — name one HEADER/task and it files under that section, which is created if missing.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if requestingAccess {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for Reminders access…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if settings.remindersSyncEnabled && engine.accessDenied {
+                    Label("DayStream isn't allowed to use Reminders. Grant access in System Settings, then turn sync back on.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Reminders")!)
+                    }
+                }
+
+                if settings.remindersSyncEnabled && engine.accessGranted {
+                    Picker("List", selection: $settings.remindersListID) {
+                        ForEach(engine.listOptions, id: \.id) { option in
+                            Text(option.title).tag(option.id)
+                        }
+                    }
+                    .onChange(of: settings.remindersListID) { _, _ in
+                        engine.reconcileNow()
+                    }
+                    HStack {
+                        Button("Sync Now") { engine.reconcileNow() }
+                            .disabled(engine.isRunning)
+                        Spacer()
+                        Text(statusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = engine.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Text("• Only the selected list is touched — a DayStream list is created the first time you sync.\n• Closing a task (checking it or deleting its text) completes its reminder; unchecking that reminder reopens the task.\n• Deleting a reminder in Reminders stops mirroring that task until it closes and reopens later.\n• Sync runs a few seconds after a change on either side, and at least every 30 seconds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460, height: 460)
+        .onAppear { engine.refreshListOptions() }
+    }
+
+    private var statusText: String {
+        guard let last = engine.lastSync else { return "Not synced yet" }
+        let summary = engine.lastSummary ?? "Up to date"
+        return "\(summary) · \(Self.relativeFormatter.string(for: last) ?? "")"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
 }
 
 /// Keyboard shortcut reference (fixed, not configurable) plus the one

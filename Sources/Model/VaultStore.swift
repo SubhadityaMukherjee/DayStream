@@ -87,6 +87,11 @@ final class VaultStore {
 
     var onExternalChange: (() -> Void)?
 
+    /// Fired after any in-place mutation of `days` (own writes, batched
+    /// cross-note echoes, watcher reloads) — the Reminders mirror schedules
+    /// its reconcile pass from it. Main thread only.
+    var onVaultMutated: (() -> Void)?
+
     /// Last vault I/O failure (failed save/delete), surfaced once by the UI
     /// and cleared there. Set on the main thread only.
     private(set) var storageErrorMessage: String?
@@ -212,6 +217,7 @@ final class VaultStore {
         pageCount = newPageCount
         pageNamesCache = nil
         scheduleOpenTaskCountUpdate()
+        onVaultMutated?()
     }
 
     /// First day included in the "All" open-task counter: three months
@@ -428,6 +434,7 @@ final class VaultStore {
                 days[dayIndex].files[fileIndex] = file
                 days[dayIndex].refreshOpenTodos()
                 scheduleOpenTaskCountUpdate()
+                onVaultMutated?()
             } else {
                 reload()
             }
@@ -451,8 +458,9 @@ final class VaultStore {
 
     /// Rewrites matching tasks in every other note to `target` — used after
     /// an editor-side toggle (⌘⏎), where the toggled note's text is already
-    /// in the editor and only the cross-note echo is the store's job.
-    func syncTodoState(taskContent: String, to target: TodoState, excluding editedURL: URL) {
+    /// in the editor and only the cross-note echo is the store's job. The
+    /// Reminders mirror passes `nil` to sync every note, editor none.
+    func syncTodoState(taskContent: String, to target: TodoState, excluding editedURL: URL?) {
         let key = BlockTree.normalize(taskContent)
         guard !key.isEmpty else { return }
         // Snapshot journal text (value copies) and page URLs on the main

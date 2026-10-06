@@ -24,6 +24,8 @@ final class AppSettings {
         static let globalQuickAddEnabled = "daystream.globalQuickAddEnabled"
         static let globalQuickAddSpec = "daystream.globalQuickAddSpec"
         static let recurringHeader = "daystream.recurringTaskHeader"
+        static let remindersSyncEnabled = "daystream.remindersSyncEnabled"
+        static let remindersListID = "daystream.remindersListID"
     }
 
     /// Automatic git backup cadence: daily or weekly (weekly is the default).
@@ -149,6 +151,16 @@ final class AppSettings {
     var recurringTaskHeader: String {
         didSet { UserDefaults.standard.set(recurringTaskHeader, forKey: Keys.recurringHeader) }
     }
+    /// Open tasks mirror into an Apple Reminders list; completion syncs
+    /// both ways. Off by default (needs Reminders access).
+    var remindersSyncEnabled: Bool {
+        didSet { UserDefaults.standard.set(remindersSyncEnabled, forKey: Keys.remindersSyncEnabled) }
+    }
+    /// Calendar identifier of the mirrored Reminders list ("" = a list
+    /// named DayStream is created/adopted on first enable).
+    var remindersListID: String {
+        didSet { UserDefaults.standard.set(remindersListID, forKey: Keys.remindersListID) }
+    }
 
     /// Header name trimmed, with the ADMIN default applied.
     var effectiveRecurringTaskHeader: String {
@@ -177,6 +189,8 @@ final class AppSettings {
         self.globalQuickAddEnabled = d.object(forKey: Keys.globalQuickAddEnabled) as? Bool ?? true
         self.globalQuickAddSpec = d.string(forKey: Keys.globalQuickAddSpec) ?? HotkeySpec.defaultQuickAdd.storage
         self.recurringTaskHeader = d.string(forKey: Keys.recurringHeader) ?? "ADMIN"
+        self.remindersSyncEnabled = d.bool(forKey: Keys.remindersSyncEnabled)
+        self.remindersListID = d.string(forKey: Keys.remindersListID) ?? ""
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {
