@@ -23,9 +23,10 @@ enum LiveMarkdown {
         let full = NSRange(location: 0, length: (line as NSString).length)
         return headingRegex.firstMatch(in: line, range: full) != nil
     }
-    /// Internal bookkeeping properties (timestamps, Logseq ids) — hidden
-    /// entirely on non-active lines, mirroring what the rendered view hid.
-    static let bookkeepingPropertyRegex = try! NSRegularExpression(pattern: #"^\s*(added|completed|id)::"#)
+    /// Internal bookkeeping properties (timestamps, Logseq ids, calendar
+    /// event anchors) — hidden entirely on non-active lines, mirroring
+    /// what the rendered view hid.
+    static let bookkeepingPropertyRegex = try! NSRegularExpression(pattern: #"^\s*(added|completed|id|event)::"#)
 
     static func isBookkeepingPropertyLine(_ line: String) -> Bool {
         let full = NSRange(location: 0, length: (line as NSString).length)

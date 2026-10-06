@@ -109,6 +109,8 @@
     <div class="card"><h3>One endless stream</h3><p>All your daily notes in a single scroll, newest first. Click a calendar day to jump anywhere.</p></div>
     <div class="card"><h3>Plain markdown</h3><p>Notes are ordinary <code>.md</code> files in <code>journals/</code>. Works alongside Logseq or any editor.</p></div>
     <div class="card"><h3>Outliner tasks</h3><p>TODO / DOING / DONE markers, nested bullets, cross-note task syncing, and one-click carry-forward.</p></div>
+    <div class="card"><h3>Apple Reminders sync</h3><p>Open tasks mirror to a Reminders list as <code>SECTION/task</code> — completion syncs both ways, and new reminders become todos.</p></div>
+    <div class="card"><h3>Calendar today-section</h3><p>The day's events land under a TODAY section in the note as plain bullets, kept current as events move.</p></div>
     <div class="card"><h3>Task timing</h3><p>New tasks record when they were added; finished tasks show how long they took, right next to them.</p></div>
     <div class="card"><h3>Recurring &amp; deadlines</h3><p>Daily / weekly / one-off tasks seed themselves on top of the day's note. Deadlines stay pinned in the sidebar.</p></div>
     <div class="card"><h3>[[Wikilinks]] &amp; pages</h3><p>Click a link to open a rendered page with Logseq-style linked references. Date links jump to that day.</p></div>
@@ -167,6 +169,7 @@
       <li><a href="#editing">Editing notes</a></li>
       <li><a href="#tasks">Tasks, timing &amp; syncing</a></li>
       <li><a href="#recurring">Recurring tasks &amp; deadlines</a></li>
+      <li><a href="#apple">Apple Reminders &amp; Calendar</a></li>
       <li><a href="#wikilinks">Wikilinks, pages &amp; search</a></li>
       <li><a href="#quickcapture">Quick capture from anywhere</a></li>
       <li><a href="#settings">Settings &amp; maintenance</a></li>
@@ -208,7 +211,13 @@
     <li><strong>Deadlines</strong> (sidebar <strong>Deadline…</strong> button) pin a dated item in the sidebar until you remove it: upcoming ones counted down (<code>Tomorrow</code>, <code>Fri</code>, <code>Aug 30</code>), today's highlighted, overdue ones in red. Clicking a deadline jumps to its day; the task itself is seeded into that day's note.</li>
   </ul>
 
-  <h3 class="sub" id="wikilinks">5. Wikilinks, pages &amp; search</h3>
+  <h3 class="sub" id="apple">5. Apple Reminders &amp; Calendar</h3>
+  <ul>
+    <li><strong>Reminders mirror (Settings → Reminders):</strong> open tasks from the last three months mirror into a Reminders list — a <em>DayStream</em> list is created the first time, or pick your own. Tasks under a section header mirror as <code>HEADER/task</code>. Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes, and unchecking it reopens the task. Reminders you add to the list become todos in today's note (name one <code>HEADER/task</code> to file it under that section, which is created if missing). Deleting a reminder in Reminders stops mirroring that task until it closes and reopens later. Sync runs a few seconds after a change on either side, with a 30-second backstop.</li>
+    <li><strong>Calendar today-section (Settings → Calendar):</strong> the day's events from every calendar are listed under a <code>- [[TODAY]]</code> section at the top of the day's note — one plain bullet per event, <code>Title, 9:00 AM</code> (all-day events have no time part). Entries are anchored to their events by a hidden marker and update in place when an event is moved or retitled. They are deliberately not tasks: they don't count as open work, never carry forward, and aren't mirrored to Reminders.</li>
+  </ul>
+
+  <h3 class="sub" id="wikilinks">6. Wikilinks, pages &amp; search</h3>
   <ul>
     <li>Typing <code>[[</code> suggests existing page names — pick with <span class="kbd">↑</span>/<span class="kbd">↓</span>, complete with <span class="kbd">Enter</span> or <span class="kbd">Tab</span>.</li>
     <li>Clicking a wikilink opens the page as a rendered, front-page-style view with <strong>Linked References</strong> (every mention across the vault). Edit toggles the raw editor.</li>
@@ -216,14 +225,16 @@
     <li>The <strong>search bar</strong> above the stream searches every journal and page at once; journal hits jump to their day, page hits open the page.</li>
   </ul>
 
-  <h3 class="sub" id="quickcapture">6. Quick capture from anywhere</h3>
+  <h3 class="sub" id="quickcapture">7. Quick capture from anywhere</h3>
   <p>A system-wide shortcut — <span class="kbd">⌥T</span> by default, recordable in <strong>Settings → Shortcuts</strong> — opens (or brings forward) DayStream from any app and starts a new todo in today's note with the caret ready, exactly like <span class="kbd">⌘N</span> inside the app. DayStream keeps a single window with no tabs; opening it again just brings the existing one forward.</p>
 
-  <h3 class="sub" id="settings">7. Settings &amp; maintenance</h3>
+  <h3 class="sub" id="settings">8. Settings &amp; maintenance</h3>
   <ul>
     <li><strong>General:</strong> vault location, cross-note task syncing, automatic daily carry-forward, and maintenance — delete empty notes, migrate legacy filenames.</li>
     <li><strong>Fonts:</strong typeface (system / serif / rounded / monospace) and size for stream, headings and editor.</li>
     <li><strong>Recurring:</strong> add and remove recurring tasks and inspect their schedules.</li>
+    <li><strong>Reminders:</strong> mirror open tasks to an Apple Reminders list — completion syncs both ways, and new reminders become todos.</li>
+    <li><strong>Calendar:</strong> list today's events under a TODAY section in the day's note.</li>
     <li><strong>Shortcuts:</strong> the full shortcut reference, plus the configurable global quick-add shortcut (record any combo with ⌘/⌥/⌃).</li>
     <li><strong>Advanced:</strong> git backup — enable it, and a one-click <em>Back Up Vault</em> button appears in the sidebar. It commits the whole vault with a fixed message and pushes it to your GitHub remote (requires git; credentials must already be configured). <em>Back up automatically</em> repeats this daily or weekly (weekly is the default; it is off until you turn it on).</li>
   </ul>
