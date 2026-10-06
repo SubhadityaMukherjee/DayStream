@@ -77,6 +77,7 @@ final class LiveMarkdownTests: XCTestCase {
         XCTAssertTrue(LiveMarkdown.isBookkeepingPropertyLine("added:: [2026-08-20]"))
         XCTAssertTrue(LiveMarkdown.isBookkeepingPropertyLine("\tcompleted:: 10:32"))
         XCTAssertTrue(LiveMarkdown.isBookkeepingPropertyLine("id:: 66f0a1"))
+        XCTAssertTrue(LiveMarkdown.isBookkeepingPropertyLine("\t\tevent:: E1A2B3#1793610000"))
         XCTAssertFalse(LiveMarkdown.isBookkeepingPropertyLine("status:: waiting"))
         XCTAssertFalse(LiveMarkdown.isBookkeepingPropertyLine("- TODO added"))
         XCTAssertFalse(LiveMarkdown.isBookkeepingPropertyLine("added up"))

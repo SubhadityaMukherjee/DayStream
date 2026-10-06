@@ -31,6 +31,9 @@ struct SettingsView: View {
             RemindersTab()
                 .tabItem { Label("Reminders", systemImage: "checklist") }
                 .tag(AppModel.SettingsTab.reminders.rawValue)
+            CalendarTab()
+                .tabItem { Label("Calendar", systemImage: "calendar") }
+                .tag(AppModel.SettingsTab.calendar.rawValue)
             ShortcutsTab()
                 .tabItem { Label("Shortcuts", systemImage: "keyboard") }
                 .tag(AppModel.SettingsTab.shortcuts.rawValue)
@@ -446,6 +449,98 @@ private struct RemindersTab: View {
         .formStyle(.grouped)
         .frame(width: 460, height: 460)
         .onAppear { engine.refreshListOptions() }
+    }
+
+    private var statusText: String {
+        guard let last = engine.lastSync else { return "Not synced yet" }
+        let summary = engine.lastSummary ?? "Up to date"
+        return "\(summary) · \(Self.relativeFormatter.string(for: last) ?? "")"
+    }
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+}
+
+/// Apple Calendar today-section: toggle (requests access), status and
+/// manual refresh. The merge logic lives in CalendarSync (pure) and
+/// CalendarSyncEngine (EventKit).
+private struct CalendarTab: View {
+    @Environment(AppModel.self) private var appModel
+    @Environment(AppSettings.self) private var settings
+    @State private var requestingAccess = false
+
+    private var engine: CalendarSyncEngine { appModel.calendarSync }
+
+    var body: some View {
+        @Bindable var settings = settings
+        Form {
+            Section("Apple Calendar") {
+                Toggle("Add today's events to today's note", isOn: $settings.calendarTodayEnabled)
+                    .disabled(requestingAccess)
+                    .onChange(of: settings.calendarTodayEnabled) { _, on in
+                        guard !requestingAccess else { return }
+                        if on {
+                            requestingAccess = true
+                            Task {
+                                await engine.enable()
+                                requestingAccess = false
+                                if !engine.accessGranted {
+                                    settings.calendarTodayEnabled = false
+                                }
+                            }
+                        } else {
+                            engine.disable()
+                        }
+                    }
+                Text("Events from every calendar are listed under a TODAY section at the top of the day's note — one plain bullet per event, \"Title, 9:00 AM\" (all-day events have no time). The section refreshes on launch, at midnight, and a few seconds after you edit events in Calendar.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if requestingAccess {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Waiting for Calendar access…")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if settings.calendarTodayEnabled && engine.accessDenied {
+                    Label("DayStream isn't allowed to use Calendar. Grant access in System Settings, then turn this back on.", systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                    Button("Open System Settings…") {
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")!)
+                    }
+                }
+
+                if settings.calendarTodayEnabled && engine.accessGranted {
+                    HStack {
+                        Button("Refresh Now") { engine.refresh() }
+                            .disabled(engine.isRunning)
+                        Spacer()
+                        Text(statusText)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let error = engine.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            Section {
+                Text("• Entries are plain bullets, not tasks — they don't count as open tasks, never carry forward, and aren't mirrored to Reminders.\n• Events are matched to their bullets by a hidden event:: marker, so re-titled or moved events update in place instead of duplicating; deleting an event in Calendar leaves its bullet in the note.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .frame(width: 460, height: 430)
     }
 
     private var statusText: String {
