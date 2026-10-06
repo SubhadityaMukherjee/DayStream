@@ -26,6 +26,7 @@ final class AppSettings {
         static let recurringHeader = "daystream.recurringTaskHeader"
         static let remindersSyncEnabled = "daystream.remindersSyncEnabled"
         static let remindersListID = "daystream.remindersListID"
+        static let calendarTodayEnabled = "daystream.calendarTodayEnabled"
     }
 
     /// Automatic git backup cadence: daily or weekly (weekly is the default).
@@ -161,6 +162,11 @@ final class AppSettings {
     var remindersListID: String {
         didSet { UserDefaults.standard.set(remindersListID, forKey: Keys.remindersListID) }
     }
+    /// Today's calendar events are listed under a TODAY section in the
+    /// day's note. Off by default (needs Calendar access).
+    var calendarTodayEnabled: Bool {
+        didSet { UserDefaults.standard.set(calendarTodayEnabled, forKey: Keys.calendarTodayEnabled) }
+    }
 
     /// Header name trimmed, with the ADMIN default applied.
     var effectiveRecurringTaskHeader: String {
@@ -191,6 +197,7 @@ final class AppSettings {
         self.recurringTaskHeader = d.string(forKey: Keys.recurringHeader) ?? "ADMIN"
         self.remindersSyncEnabled = d.bool(forKey: Keys.remindersSyncEnabled)
         self.remindersListID = d.string(forKey: Keys.remindersListID) ?? ""
+        self.calendarTodayEnabled = d.bool(forKey: Keys.calendarTodayEnabled)
     }
 
     var fontDesignValue: NSFontDescriptor.SystemDesign {

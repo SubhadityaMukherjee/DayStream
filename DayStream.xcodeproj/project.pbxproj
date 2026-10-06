@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		02348FA693EAE80D04342D59 /* RemindersSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269744774E9537EB200D32C3 /* RemindersSyncTests.swift */; };
+		0C355CCE75A4CC9BE3801FA1 /* CalendarSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 450DCB1D0CF60E88EFCE08A5 /* CalendarSync.swift */; };
 		135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */; };
 		1436703D1FF1DE32722616F5 /* MainView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 478B8797070D7D84A9968027 /* MainView.swift */; };
 		1655BDF3E41349657463F5E4 /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17F31F460EEA0E1C97C0416 /* WelcomeView.swift */; };
@@ -46,6 +47,7 @@
 		D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B67635F43462BF67C2E4426 /* AppModel.swift */; };
 		DA0B6ADB5FDF45A3CA8AAA36 /* DaySummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3BEB60C9E88D9E041E383BA /* DaySummary.swift */; };
 		E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E92717A6954CD9FDA5303AD7 /* DailyStreamView.swift */; };
+		E1A92D84309B792FECB7238D /* CalendarSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9D20AF582CF40D51EC7C7B7 /* CalendarSyncTests.swift */; };
 		F041E06F0CD74FD26D05F14C /* GitBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03BF7475F5D0773C6F0DDC5B /* GitBackup.swift */; };
 /* End PBXBuildFile section */
 
@@ -71,6 +73,7 @@
 		269744774E9537EB200D32C3 /* RemindersSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersSyncTests.swift; sourceTree = "<group>"; };
 		348372FB8F5CCC693BB9F6BC /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		424E0ECF875895A3EC9513CA /* PageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PageView.swift; sourceTree = "<group>"; };
+		450DCB1D0CF60E88EFCE08A5 /* CalendarSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSync.swift; sourceTree = "<group>"; };
 		46D7A88C7C41D3B06072764F /* NoteFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFormatter.swift; sourceTree = "<group>"; };
 		478B8797070D7D84A9968027 /* MainView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainView.swift; sourceTree = "<group>"; };
 		4C2CAA3EBB24EC378F823AA0 /* GlobalQuickAdd.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalQuickAdd.swift; sourceTree = "<group>"; };
@@ -91,6 +94,7 @@
 		97CB131027A4266DC2C0B9A6 /* DayStreamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DayStreamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A7095D2E8BAAA3630B334211 /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		A86F2ED4411BBE44B6243822 /* DaySectionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DaySectionView.swift; sourceTree = "<group>"; };
+		A9D20AF582CF40D51EC7C7B7 /* CalendarSyncTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarSyncTests.swift; sourceTree = "<group>"; };
 		B5121535597CF66EE7B102F4 /* JournalDate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = JournalDate.swift; sourceTree = "<group>"; };
 		B84877F8F494AFFEAA6E3850 /* CarryForward.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarryForward.swift; sourceTree = "<group>"; };
 		C14A21F9F98D595DFF1FB767 /* DayStream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DayStream.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -119,6 +123,7 @@
 			isa = PBXGroup;
 			children = (
 				6325935B942277AF6F6D0638 /* BlockTree.swift */,
+				450DCB1D0CF60E88EFCE08A5 /* CalendarSync.swift */,
 				B84877F8F494AFFEAA6E3850 /* CarryForward.swift */,
 				D3BEB60C9E88D9E041E383BA /* DaySummary.swift */,
 				19C1E6CA336FB755C292C968 /* Deadline.swift */,
@@ -149,6 +154,7 @@
 			isa = PBXGroup;
 			children = (
 				620146C468EB56136EDBB285 /* BlockAndCarryTests.swift */,
+				A9D20AF582CF40D51EC7C7B7 /* CalendarSyncTests.swift */,
 				172F15ADA3B361C20AAE2F3C /* CodeBlockAndFormatTests.swift */,
 				92C5AAA3E8601383E843D40F /* DaySummaryTests.swift */,
 				69B4E4577C30F9F4B42348C4 /* JournalAndWikiTests.swift */,
@@ -312,6 +318,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				135390D1DCAA9A3B24B06B50 /* BlockAndCarryTests.swift in Sources */,
+				E1A92D84309B792FECB7238D /* CalendarSyncTests.swift in Sources */,
 				35057C22F5ABD5CBF5D05EC0 /* CodeBlockAndFormatTests.swift in Sources */,
 				71D23E6D732DCB1AC8892DE3 /* DaySummaryTests.swift in Sources */,
 				92588F96D1C9897FD667B72B /* JournalAndWikiTests.swift in Sources */,
@@ -330,6 +337,7 @@
 				D956C9AB639921B29C62C7CF /* AppModel.swift in Sources */,
 				70F46FD8CBBF0B1194BB5553 /* AppSettings.swift in Sources */,
 				5985E748E9FB36A2A60E1C87 /* BlockTree.swift in Sources */,
+				0C355CCE75A4CC9BE3801FA1 /* CalendarSync.swift in Sources */,
 				2BAFED654C70A42DE04B3742 /* CalendarView.swift in Sources */,
 				A02731B6B5E3C6B676078C8D /* CarryForward.swift in Sources */,
 				E06F0F8033F1C44F60A9EC91 /* DailyStreamView.swift in Sources */,
@@ -444,7 +452,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.9.0;
+				MARKETING_VERSION = 1.10.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -553,7 +561,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				MARKETING_VERSION = 1.9.0;
+				MARKETING_VERSION = 1.10.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;

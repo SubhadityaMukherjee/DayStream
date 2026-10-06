@@ -7,7 +7,7 @@ options:
 
 settings:
   base:
-    MARKETING_VERSION: "1.9.0"
+    MARKETING_VERSION: "1.10.0"
     CURRENT_PROJECT_VERSION: "1"
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
@@ -40,6 +40,8 @@ targets:
         NSSupportsSuddenTermination: false
         NSHumanReadableCopyright: DayStream
         NSRemindersUsageDescription: DayStream mirrors your open tasks as reminders and keeps completion in sync between your notes and Reminders.
+        NSCalendarsUsageDescription: DayStream lists today's calendar events under a TODAY section in today's note.
+        NSCalendarsFullAccessUsageDescription: DayStream lists today's calendar events under a TODAY section in today's note. It never modifies your calendars.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.daystream.app
