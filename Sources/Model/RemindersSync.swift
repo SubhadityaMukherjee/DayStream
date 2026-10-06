@@ -575,24 +575,18 @@ final class RemindersSyncEngine {
                     store.syncTodoState(taskContent: title, to: .open, excluding: nil)
                 }
                 for title in imports {
-                    Self.importIntoVault(title: title, store: store)
+                    // A `HEADER/task` reminder files the task under that
+                    // section in today's note; addRecurringTask creates the
+                    // `- [[HEADER]]` bullet when missing and stamps added::
+                    // exactly like every other inserted task.
+                    if let split = RemindersSync.splitHeader(title) {
+                        _ = store.addRecurringTask(split.task, to: Date(), header: split.header)
+                    } else {
+                        _ = store.addTask(title, to: Date(), atTop: false)
+                    }
                 }
             }
         }
-    }
-
-    /// A `HEADER/task` reminder becomes a task under that section in
-    /// today's note — but only when the header already exists there, so
-    /// titles that merely contain a slash ("2026/2027 plan") import whole.
-    private static func importIntoVault(title: String, store: VaultStore) {
-        if let split = RemindersSync.splitHeader(title) {
-            let (_, todayText) = store.ensureTodayFile()
-            if VaultStore.recurringHeaderLineIndex(header: split.header, in: todayText) != nil {
-                _ = store.addRecurringTask(split.task, to: Date(), header: split.header)
-                return
-            }
-        }
-        _ = store.addTask(title, to: Date(), atTop: false)
     }
 
     private func saveState() {

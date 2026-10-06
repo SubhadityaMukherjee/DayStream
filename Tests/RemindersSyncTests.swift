@@ -100,6 +100,30 @@ final class RemindersSyncTests: XCTestCase {
         XCTAssertNil(RemindersSync.splitHeader("ADMIN/"))
     }
 
+    /// The engine's import path for `HEADER/task` reminders: same calls,
+    /// minus EventKit. Pins the user-visible outcome — section bullet
+    /// created, task indented under it, added:: stamped.
+    func testSectionedImportLandsUnderHeaderWithMetadata() throws {
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("daystream-reminders-import-\(UUID().uuidString)", isDirectory: true)
+        let journals = tmp.appendingPathComponent("journals", isDirectory: true)
+        try FileManager.default.createDirectory(at: journals, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        let store = VaultStore(vaultURL: tmp, watchEnabled: false)
+        store.reload()
+
+        guard let split = RemindersSync.splitHeader("ADMIN/Call the bank") else {
+            return XCTFail("splitHeader failed")
+        }
+        XCTAssertTrue(store.addRecurringTask(split.task, to: Date(), header: split.header))
+
+        let text = try String(contentsOf: store.todayURL, encoding: .utf8)
+        let lines = text.components(separatedBy: "\n")
+        XCTAssertEqual(lines.first, "- [[ADMIN]]")
+        XCTAssertEqual(lines.dropFirst().first, "\t- TODO Call the bank")
+        XCTAssertTrue(lines.dropFirst(2).first?.hasPrefix("\t\tadded:: ") == true)
+    }
+
     // MARK: - plan: push
 
     func testInitialMirrorCreatesReminders() {

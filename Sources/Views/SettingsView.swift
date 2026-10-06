@@ -391,7 +391,7 @@ private struct RemindersTab: View {
                             engine.disable()
                         }
                     }
-                Text("Open tasks from the last three months are mirrored as reminders, titled SECTION/task under a section header (e.g. ADMIN/task). Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note — name one HEADER/task to file it under that section.")
+                Text("Open tasks from the last three months are mirrored as reminders, titled SECTION/task under a section header (e.g. ADMIN/task). Checking a task completes its reminder; completing a reminder checks every copy of the task in your notes. Reminders you add to the list become todos in today's note — name one HEADER/task and it files under that section, which is created if missing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
